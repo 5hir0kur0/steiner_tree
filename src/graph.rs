@@ -25,6 +25,27 @@ impl FromStr for Graph {
     }
 }
 
+impl Graph {
+    pub fn number_of_nodes(&self) -> usize {
+        self.edges.len() // since `edges` is an adjacency vector this is the number of *nodes*
+    }
+
+    /// Return an iterator over all edges. Only edges `(a,b)` with `a < b` are returned since
+    /// this is an undirected graph.
+    pub fn edges(&self) -> impl Iterator<Item = (NodeIndex, NodeIndex, EdgeWeight)> + '_ {
+        self.edges
+            .iter()
+            .enumerate()
+            .flat_map(|(from, e)| e.iter().map(move |&Edge { to, weight }| (from, to, weight)))
+            .filter(|&(from, to, _)| from < to)
+    }
+
+    /// Iterator over the node indices.
+    pub fn node_indices(&self) -> impl Iterator<Item = NodeIndex> {
+        0..self.number_of_nodes()
+    }
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub struct ParseError {
     line: usize,
@@ -275,11 +296,10 @@ pub fn parse_graph(text: &str) -> ParseResult<Graph> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::util::GenericResult;
+pub(crate) mod tests {
+    use crate::util::TestResult;
 
-    type TestResult = GenericResult<()>;
+    use super::*;
 
     #[test]
     fn test_parsed_node_index() -> TestResult {
@@ -333,26 +353,66 @@ mod tests {
         Ok(())
     }
 
+    /// ```text
+    ///     1
+    /// 0 ----- 1
+    ///  \     /
+    /// 3 \   / 2
+    ///    \ /
+    ///     2
+    /// ```
+    pub(crate) fn small_test_graph() -> ParseResult<Graph> {
+        "SECTION Graph\n\
+        Nodes 3\n\
+        Edges 3\n\
+        E 1 2 1\n\
+        E 2 3 2\n\
+        E 3 1 3\n\
+        END\n\
+
+        SECTION Terminals\n\
+        Terminals 2\n\
+        T 1\n\
+        T 3\n\
+        END\n\
+
+        EOF\n"
+            .parse::<Graph>()
+    }
+
+    /// ```text
+    ///    1
+    ///  0----1
+    ///  |  / |
+    /// 7| /1 |2
+    ///  |/   |
+    ///  2----3
+    ///    4
+    /// ```
+    pub(crate) fn shortcut_test_graph() -> ParseResult<Graph> {
+        "SECTION Graph\n\
+        Nodes 4\n\
+        Edges 5\n\
+        E 1 2 1\n\
+        E 2 4 2\n\
+        E 2 3 1\n\
+        E 3 4 4\n\
+        E 1 3 7\n\
+        END\n\
+
+        SECTION Terminals\n\
+        Terminals 2\n\
+        T 1\n\
+        T 3\n\
+        END\n\
+
+        EOF\n"
+            .parse::<Graph>()
+    }
+
     #[test]
-    fn test_parse_graph() -> TestResult {
-        let graph = "\
-            SECTION Graph\n\
-            Nodes 3\n\
-            Edges 3\n\
-            E 1 2 1\n\
-            E 2 3 2\n\
-            E 3 1 3\n\
-            END\n\
-
-            SECTION Terminals\n\
-            Terminals 2\n\
-            T 1\n\
-            T 3\n\
-            END\n\
-
-            EOF\n"
-            .parse::<Graph>()?;
-
+    fn test_parse_small_graph() -> TestResult {
+        let graph = small_test_graph()?;
         assert_eq!(
             graph,
             Graph {
