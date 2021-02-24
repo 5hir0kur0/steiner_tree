@@ -44,6 +44,10 @@ impl Graph {
     pub fn node_indices(&self) -> impl Iterator<Item = NodeIndex> {
         0..self.number_of_nodes()
     }
+
+    pub fn terminals(&self) -> &[NodeIndex] {
+        &self.terminals
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -84,7 +88,7 @@ impl FromStr for ParsedNodeIndex {
     type Err = ParseIntError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        s.parse().map(|n| ParsedNodeIndex(n))
+        s.parse().map(ParsedNodeIndex)
     }
 }
 
@@ -94,7 +98,7 @@ impl From<ParsedNodeIndex> for NodeIndex {
             i > 0,
             "input file does not match the PACE format (node indices must be between 1 and #nodes)"
         );
-        i - 1 as NodeIndex
+        i - 1
     }
 }
 
@@ -288,9 +292,9 @@ pub fn parse_graph(text: &str) -> ParseResult<Graph> {
     state = symbol(state, "END")?;
     skip_empty_lines(&mut state);
     symbol(state, "EOF")?;
-    terminals.sort();
+    terminals.sort_unstable();
     for vec in &mut edges {
-        vec.sort_by_key(|e| e.to);
+        vec.sort_unstable_by_key(|e| e.to);
     }
     Ok(Graph { edges, terminals })
 }
@@ -393,10 +397,10 @@ pub(crate) mod tests {
         "SECTION Graph\n\
         Nodes 4\n\
         Edges 5\n\
-        E 1 2 1\n\
+        E 2 1 1\n\
         E 2 4 2\n\
         E 2 3 1\n\
-        E 3 4 4\n\
+        E 4 3 4\n\
         E 1 3 7\n\
         END\n\
 
@@ -408,6 +412,18 @@ pub(crate) mod tests {
 
         EOF\n"
             .parse::<Graph>()
+    }
+
+    #[test]
+    fn test_edges() -> TestResult {
+        let short = shortcut_test_graph()?;
+        let mut edges = short.edges().collect::<Vec<_>>();
+        edges.sort_by_key(|&(a, b, _)| [a, b]);
+        assert_eq!(
+            edges,
+            vec![(0, 1, 1), (0, 2, 7), (1, 2, 1), (1, 3, 2), (2, 3, 4),]
+        );
+        Ok(())
     }
 
     #[test]
