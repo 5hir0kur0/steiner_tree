@@ -262,7 +262,9 @@ impl<T: Copy + Default> IndexSetMap<T> {
         // 4 as the first index because then there wouldn't be a bigger element for the second
         // dimension.
         // Therefore every dimension can at most have `#elements - (subset_size - 1)`
-        let dimensions = iter::repeat(num_elements - (subset_size - 1)).take(subset_size).collect();
+        let dimensions = iter::repeat(num_elements - (subset_size - 1))
+            .take(subset_size)
+            .collect();
         Self {
             map: Vector::new(dimensions),
             subset_size,
