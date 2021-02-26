@@ -2,8 +2,9 @@ use std::fmt::Display;
 use std::num::ParseIntError;
 use std::{error::Error, str::FromStr};
 
-type NodeIndex = usize;
-type EdgeWeight = u32;
+pub type NodeIndex = usize;
+pub type TerminalIndex = usize;
+pub type EdgeWeight = u32;
 
 #[derive(Eq, PartialEq, Clone, Debug)]
 pub struct Edge {
@@ -26,7 +27,7 @@ impl FromStr for Graph {
 }
 
 impl Graph {
-    pub fn number_of_nodes(&self) -> usize {
+    pub fn num_nodes(&self) -> usize {
         self.edges.len() // since `edges` is an adjacency vector this is the number of *nodes*
     }
 
@@ -42,11 +43,23 @@ impl Graph {
 
     /// Iterator over the node indices.
     pub fn node_indices(&self) -> impl Iterator<Item = NodeIndex> {
-        0..self.number_of_nodes()
+        0..self.num_nodes()
     }
 
     pub fn terminals(&self) -> &[NodeIndex] {
         &self.terminals
+    }
+
+    pub fn terminal(&self, index: TerminalIndex) -> NodeIndex {
+        self.terminals[index]
+    }
+
+    pub fn num_terminals(&self) -> usize {
+        self.terminals.len()
+    }
+
+    pub fn terminal_indices(&self) -> impl Iterator<Item = TerminalIndex> {
+        0..self.num_terminals()
     }
 }
 
@@ -408,6 +421,41 @@ pub(crate) mod tests {
         Terminals 2\n\
         T 1\n\
         T 3\n\
+        END\n\
+
+        EOF\n"
+            .parse::<Graph>()
+    }
+
+    /// From [Wikipedia](https://de.wikipedia.org/wiki/Steinerbaumproblem#/media/Datei:Steinerbaum_Beispiel_Graph.svg).
+    pub(crate) fn non_trivial_steiner() -> ParseResult<Graph> {
+        "SECTION Graph\n\
+        Nodes 12\n\
+        Edges 15\n\
+        E 1 2 15\n\
+        E 2 3 30\n\
+        E 3 4 50\n\
+        E 4 7 30\n\
+        E 1 5 25\n\
+        E 2 9 50\n\
+        E 2 6 45\n\
+        E 3 6 40\n\
+        E 6 8 60\n\
+        E 7 8 20\n\
+        E 5 9 30\n\
+        E 9 11 15\n\
+        E 8 10 50\n\
+        E 11 10 40\n\
+        E 12 11 10\n\
+        END\n\
+
+        SECTION Terminals\n\
+        Terminals 5\n\
+        T 1\n\
+        T 9\n\
+        T 12\n\
+        T 7\n\
+        T 8\n\
         END\n\
 
         EOF\n"

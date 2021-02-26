@@ -9,7 +9,7 @@ pub struct ShortestPathMatrix {
 
 impl ShortestPathMatrix {
     pub fn new(graph: &Graph) -> Self {
-        let n = graph.number_of_nodes();
+        let n = graph.num_nodes();
         let paths = vec![NaturalOrInfinite::infinity(); n * n];
         let mut res = ShortestPathMatrix {
             paths,
@@ -67,11 +67,11 @@ impl IndexMut<usize> for ShortestPathMatrix {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::graph::tests::{shortcut_test_graph, small_test_graph};
+    use crate::graph::tests::{shortcut_test_graph, small_test_graph, non_trivial_steiner};
     use crate::util::TestResult;
 
     #[test]
-    fn test_shortest_path_matrix() -> TestResult {
+    fn test_shortest_path_matrix_1() -> TestResult {
         let graph = small_test_graph()?;
         let spm = ShortestPathMatrix::new(&graph);
         assert_eq!(spm[0][1], 1.into());
@@ -81,12 +81,28 @@ mod tests {
     }
 
     #[test]
-    fn test_shortest_path_matrix2() -> TestResult {
+    fn test_shortest_path_matrix_2() -> TestResult {
         let graph = shortcut_test_graph()?;
         let spm = ShortestPathMatrix::new(&graph);
         assert_eq!(spm[0][2], 2.into());
         assert_eq!(spm[3][0], 3.into());
         assert_eq!(spm[3][2], 3.into());
+
+        for i in 0..spm.dimension {
+            for j in 0..spm.dimension {
+                assert_eq!(spm[i][j], spm[j][i]);
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn test_shortest_path_matrix_3() -> TestResult {
+        let graph = non_trivial_steiner()?;
+        let spm = ShortestPathMatrix::new(&graph);
+        assert_eq!(spm[11][0], (10 + 15 + 30 + 25).into());
+        assert_eq!(spm[6][9], (50 + 20).into());
+        assert_eq!(spm[6][11], (10 + 40 + 50 + 20).into());
 
         for i in 0..spm.dimension {
             for j in 0..spm.dimension {
