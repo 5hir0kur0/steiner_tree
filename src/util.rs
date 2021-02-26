@@ -1,5 +1,6 @@
 use std::cmp::Ordering;
 use std::error::Error;
+use std::iter;
 use std::ops::{Add, Index, IndexMut};
 
 /// Result with boxed error as trait object.
@@ -15,14 +16,20 @@ pub struct NaturalOrInfinite(i64);
 
 impl PartialOrd for NaturalOrInfinite {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for NaturalOrInfinite {
+    fn cmp(&self, other: &Self) -> Ordering {
         if self.0 < 0 && other.0 < 0 {
-            Some(Ordering::Equal)
+            Ordering::Equal
         } else if other.0 < 0 {
-            Some(Ordering::Less)
+            Ordering::Less
         } else if self.0 < 0 {
-            Some(Ordering::Greater)
+            Ordering::Greater
         } else {
-            Some(self.0.cmp(&other.0))
+            self.0.cmp(&other.0)
         }
     }
 }
@@ -51,15 +58,9 @@ impl From<u32> for NaturalOrInfinite {
     }
 }
 
-/// Return all combinations (subsets) of the given length.
-pub fn combinations<T: Copy>(elements: &[T], n: usize) -> Combinations<T> {
-    assert!(n <= elements.len(), "n cannot be larger than #elements");
-    Combinations {
-        elements,
-        indices: (0..n).collect(),
-        count_position: if n > 0 { n - 1 } else { 0 },
-        buffer: Vec::with_capacity(n),
-        first_iteration: true,
+impl Default for NaturalOrInfinite {
+    fn default() -> Self {
+        NaturalOrInfinite::infinity()
     }
 }
 
@@ -71,22 +72,38 @@ pub struct Combinations<'a, T: Copy> {
     first_iteration: bool,
 }
 
+/// Return all combinations (subsets) of the given length.
+/// Inspired by [this](https://github.com/rust-itertools/itertools/blob/master/src/combinations.rs).
+pub fn combinations<T: Copy>(elements: &[T], n: usize) -> Combinations<T> {
+    assert!(n <= elements.len(), "n cannot be larger than #elements");
+    Combinations {
+        elements,
+        indices: (0..n).collect(),
+        count_position: if n > 0 { n - 1 } else { 0 },
+        buffer: Vec::with_capacity(n),
+        first_iteration: true,
+    }
+}
+
 impl<'a, T: Copy> Combinations<'a, T> {
-    fn index_done(&self, index: usize) -> bool {
+    /// Check if the index at the given index can be incremented any further.
+    fn is_index_done(&self, index: usize) -> bool {
         self.indices[index] >= self.elements.len() - (self.indices.len() - index)
     }
 
+    /// Update buffer element at the position `index`.
     fn update_buffer(&mut self, index: usize) {
         self.buffer[index] = self.elements[self.indices[index]];
     }
 
+    /// Go to the next subset.
     fn increment(&mut self) -> bool {
-        if !self.index_done(self.count_position) {
+        if !self.is_index_done(self.count_position) {
             self.indices[self.count_position] += 1;
             self.update_buffer(self.count_position);
         } else {
             let mut i = self.count_position;
-            while self.index_done(i) {
+            while self.is_index_done(i) {
                 if i == 0 {
                     return false;
                 }
@@ -104,10 +121,12 @@ impl<'a, T: Copy> Combinations<'a, T> {
         true
     }
 
-    // I can't make this into a "real" iterator because the iterator protocol is too restrictive
-    // to allow returning references to the iterator itself so I would have to allocate each time
-    // which I don't want to.
-    pub(crate) fn next(&mut self) -> Option<&[T]> {
+    // This can't be the "real" iterator implementation because the iterator protocol is too
+    // restrictive to allow returning references to the iterator itself so I would have to allocate
+    // each time which the caller might not want to.
+    // Therefore I made this function for the cases where it is not necessary to own the returned
+    // subset.
+    pub(crate) fn next_buf(&mut self) -> Option<&[T]> {
         if self.first_iteration {
             for &i in &self.indices {
                 self.buffer.push(self.elements[i]);
@@ -120,14 +139,52 @@ impl<'a, T: Copy> Combinations<'a, T> {
             None
         }
     }
+}
 
-    #[cfg(test)]
-    fn collect(&mut self) -> Vec<Vec<T>> {
-        let mut res = vec![];
-        while let Some(val) = self.next() {
-            res.push(val.to_vec());
+impl<'a, T: Copy> Iterator for Combinations<'a, T> {
+    type Item = Vec<T>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.next_buf().map(<[_]>::to_vec)
+    }
+}
+
+pub struct NonTrivialSubsets<'a, T: Copy> {
+    element_count: usize,
+    combinations: Combinations<'a, T>,
+    elements: &'a [T],
+}
+
+impl<'a, T: Copy> NonTrivialSubsets<'a, T> {
+    pub fn new(elements: &'a [T]) -> Self {
+        Self {
+            element_count: 1,
+            combinations: combinations(elements, 1),
+            elements,
         }
-        res
+    }
+}
+
+pub fn non_trivial_subsets<T: Copy>(elements: &[T]) -> NonTrivialSubsets<T> {
+    NonTrivialSubsets::new(elements)
+}
+
+impl<'a, T: Copy> Iterator for NonTrivialSubsets<'a, T> {
+    type Item = Vec<T>;
+
+    fn next(&mut self) -> Option<Vec<T>> {
+        match self.combinations.next_buf() {
+            None => {
+                if self.element_count < self.elements.len() - 1 {
+                    self.element_count += 1;
+                    self.combinations = combinations(self.elements, self.element_count);
+                    self.combinations.next_buf().map(<[_]>::to_vec)
+                } else {
+                    None
+                }
+            }
+            Some(res) => Some(res.to_vec()),
+        }
     }
 }
 
@@ -152,10 +209,13 @@ impl<T: Default + Clone> Vector<T> {
     }
 
     fn raw_index(&self, index: &[usize]) -> usize {
-        debug_assert!(index
-            .iter()
-            .enumerate()
-            .all(|(ii, &i)| i < self.dimensions[ii]));
+        debug_assert!(
+            index
+                .iter()
+                .enumerate()
+                .all(|(ii, &i)| i < self.dimensions[ii]),
+            format!("index out of range: {:?}", index)
+        );
         index
             .iter()
             .copied()
@@ -189,6 +249,7 @@ impl<T: Default + Clone> IndexMut<&[usize]> for Vector<T> {
 /// case the index value is moved.
 pub struct IndexSetMap<T: Copy + Default> {
     map: Vector<T>,
+    #[cfg(debug_assertions)]
     subset_size: usize,
 }
 
@@ -196,39 +257,32 @@ impl<T: Copy + Default> IndexSetMap<T> {
     pub fn new(num_elements: usize, subset_size: usize) -> Self {
         // Since we're talking about sets the dimensions get smaller towards the end.
         // Indices are always going to be ordered, so a two-dimensional IndexSetMap over the
-        // indices {1, 2, 3} can never have 1 as its second index.
-        let dimensions = (0..subset_size).map(|i| num_elements - i).collect();
+        // indices {0, 1, 2, 3, 4} can never have 0 as its second index.
+        // But there also has to be enough elements "left" afterwards so it could also not have
+        // 4 as the first index because then there wouldn't be a bigger element for the second
+        // dimension.
+        // Therefore every dimension can at most have `#elements - (subset_size - 1)`
+        let dimensions = iter::repeat(num_elements - (subset_size - 1)).take(subset_size).collect();
         Self {
             map: Vector::new(dimensions),
             subset_size,
         }
     }
 
+    #[cfg(debug_assertions)]
+    pub fn subset_size(&self) -> usize {
+        self.subset_size
+    }
+
     fn calculate_index(index: &mut [usize]) {
-        index.sort_unstable();
-        index.iter_mut().enumerate().map(|(ii, i)| *i -= ii);
         #[cfg(debug_assertions)]
         {
             let mut index2 = index.to_vec();
             index2.dedup();
             debug_assert!(index2.len() == index.len())
         }
-    }
-}
-
-impl<T: Copy + Default> Index<&mut [usize]> for IndexSetMap<T> {
-    type Output = T;
-
-    fn index(&self, index: &mut [usize]) -> &Self::Output {
-        Self::calculate_index(index);
-        &self.map[index]
-    }
-}
-
-impl<T: Copy + Default> IndexMut<&mut [usize]> for IndexSetMap<T> {
-    fn index_mut(&mut self, index: &mut [usize]) -> &mut Self::Output {
-        Self::calculate_index(index);
-        &mut self.map[index]
+        index.sort_unstable();
+        index.iter_mut().enumerate().for_each(|(ii, i)| *i -= ii);
     }
 }
 
@@ -236,18 +290,71 @@ impl<T: Copy + Default> Index<Vec<usize>> for IndexSetMap<T> {
     type Output = T;
 
     fn index(&self, mut index: Vec<usize>) -> &Self::Output {
-        self.index(&mut index[..])
+        Self::calculate_index(&mut index);
+        &self.map[&index]
     }
 }
 
 impl<T: Copy + Default> IndexMut<Vec<usize>> for IndexSetMap<T> {
     fn index_mut(&mut self, mut index: Vec<usize>) -> &mut Self::Output {
-        self.index_mut(&mut index[..])
+        Self::calculate_index(&mut index);
+        &mut self.map[&index]
     }
 }
 
+/// List of [IndexSetMaps] that can be accessed with an offset.
+/// Subsets below the offset could e.g. be those that are considered "trivial" and thus need not
+/// be considered. Cf. the usage in [crate::steiner_tree::dreyfus_wagner].
+pub(crate) struct IndexSetMaps<T: Copy + Default> {
+    maps: Vec<IndexSetMap<T>>,
+    offset: usize,
+}
+
+impl<T: Copy + Default> IndexSetMaps<T> {
+    pub fn new(offset: usize) -> Self {
+        Self {
+            maps: vec![],
+            offset,
+        }
+    }
+
+    pub fn push(&mut self, map: IndexSetMap<T>) {
+        assert_eq!(self.maps.len() + self.offset, map.subset_size());
+        self.maps.push(map);
+    }
+
+    #[cfg(test)]
+    pub fn len(&self) -> usize {
+        self.maps.len()
+    }
+}
+
+impl<T: Copy + Default> Index<Vec<usize>> for IndexSetMaps<T> {
+    type Output = T;
+
+    fn index(&self, index: Vec<usize>) -> &Self::Output {
+        &self.maps[index.len() - self.offset][index]
+    }
+}
+
+impl<T: Copy + Default> IndexMut<Vec<usize>> for IndexSetMaps<T> {
+    fn index_mut(&mut self, index: Vec<usize>) -> &mut Self::Output {
+        &mut self.maps[index.len() - self.offset][index]
+    }
+}
+
+#[cfg(debug_assertions)]
+pub(crate) fn sorted<T: Ord>(elements: &[T]) -> bool {
+    for (a, b) in elements.iter().zip(elements.iter().skip(1)) {
+        if a > b {
+            return false;
+        }
+    }
+    true
+}
+
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     #[test]
@@ -266,30 +373,70 @@ mod tests {
     #[test]
     fn test_combinations_trivial() {
         let empty: &[()] = &[];
-        assert_eq!(combinations(empty, 0).collect(), vec![[]]);
+        assert_eq!(combinations(empty, 0).collect::<Vec<_>>(), vec![[]]);
         let one = &[1];
-        assert_eq!(combinations(one, 0).collect(), vec![[]]);
-        assert_eq!(combinations(one, 1).collect(), vec![[1]]);
+        assert_eq!(combinations(one, 0).collect::<Vec<_>>(), vec![[]]);
+        assert_eq!(combinations(one, 1).collect::<Vec<_>>(), vec![[1]]);
         let two = &[1, 2];
-        assert_eq!(combinations(two, 0).collect(), vec![[]]);
-        assert_eq!(combinations(two, 1).collect(), vec![[1], [2]]);
-        assert_eq!(combinations(two, 2).collect(), vec![[1, 2]]);
+        assert_eq!(combinations(two, 0).collect::<Vec<_>>(), vec![[]]);
+        assert_eq!(combinations(two, 1).collect::<Vec<_>>(), vec![[1], [2]]);
+        assert_eq!(combinations(two, 2).collect::<Vec<_>>(), vec![[1, 2]]);
     }
 
     #[test]
     fn test_combinations() {
         let four = &[1, 2, 3, 4];
-        assert_eq!(combinations(four, 0).collect(), vec![[]]);
-        assert_eq!(combinations(four, 1).collect(), vec![[1], [2], [3], [4]]);
+        assert_eq!(combinations(four, 0).collect::<Vec<_>>(), vec![[]]);
         assert_eq!(
-            combinations(four, 2).collect(),
+            combinations(four, 1).collect::<Vec<_>>(),
+            vec![[1], [2], [3], [4]]
+        );
+        assert_eq!(
+            combinations(four, 2).collect::<Vec<_>>(),
             vec![[1, 2], [1, 3], [1, 4], [2, 3], [2, 4], [3, 4]]
         );
         assert_eq!(
-            combinations(four, 3).collect(),
+            combinations(four, 3).collect::<Vec<_>>(),
             vec![[1, 2, 3], [1, 2, 4], [1, 3, 4], [2, 3, 4]]
         );
-        assert_eq!(combinations(four, 4).collect(), vec![[1, 2, 3, 4]]);
+        assert_eq!(
+            combinations(four, 4).collect::<Vec<_>>(),
+            vec![[1, 2, 3, 4]]
+        );
+    }
+
+    #[test]
+    fn test_nontrivial_subsets() {
+        let four = &[1, 2, 3, 4];
+        assert_eq!(
+            NonTrivialSubsets::new(four).collect::<Vec<_>>(),
+            vec![
+                vec![1],
+                vec![2],
+                vec![3],
+                vec![4],
+                vec![1, 2],
+                vec![1, 3],
+                vec![1, 4],
+                vec![2, 3],
+                vec![2, 4],
+                vec![3, 4],
+                vec![1, 2, 3],
+                vec![1, 2, 4],
+                vec![1, 3, 4],
+                vec![2, 3, 4]
+            ]
+        );
+    }
+
+    #[test]
+    fn test_combinations_sorted() {
+        let lots: Vec<u32> = (1..=1000).collect();
+        for n in 1..1000 {
+            for (_, comb) in (0..3).zip(combinations(&lots, n)) {
+                assert!(sorted(&comb))
+            }
+        }
     }
 
     #[test]
@@ -301,7 +448,7 @@ mod tests {
         assert_eq!(vec.raw_index(&[1, 1, 1]), 9);
         let vec: Vector<String> = Vector::new(vec![42]);
         assert_eq!(vec.raw_index(&[21]), 21);
-        let mut vec: Vector<&str> = Vector::new(vec![12, 24, 7, 17, 13, 5]);
+        let vec: Vector<&str> = Vector::new(vec![12, 24, 7, 17, 13, 5]);
         let index = &[9, 21, 5, 12, 7, 3];
         assert_eq!(
             vec.raw_index(index),
@@ -375,13 +522,51 @@ mod tests {
     }
 
     #[test]
-    fn test_index_set_map() {
+    fn test_index_set_map_1() {
         let mut map = IndexSetMap::new(100, 3);
         map[vec![1, 2, 3]] = "frog";
-        let mut index = vec![3, 1, 2];
-        assert_eq!(map[&mut index[..]], "frog");
-        assert_eq!(index, vec![1, 2, 3]);
-        map[&mut [42usize, 21usize, 10usize][..]] = "dragonfly";
-        assert_eq!(map[&mut [10usize, 21usize, 42usize][..]], "dragonfly");
+        let index = vec![3, 1, 2];
+        assert_eq!(map[index], "frog");
+        map[vec![42usize, 21usize, 10usize]] = "dragonfly";
+        assert_eq!(map[vec![10usize, 21usize, 42usize]], "dragonfly");
+    }
+
+    #[test]
+    fn test_index_set_map_2() {
+        let mut map = IndexSetMap::new(10, 3);
+        let ten: Vec<_> = (0..9).collect();
+        for subset in combinations(&ten, 3) {
+            let val = subset[0] * 100 + subset[1] * 10 + subset[0];
+            map[subset] = val;
+        }
+        for subset in combinations(&ten, 3) {
+            let val = subset[0] * 100 + subset[1] * 10 + subset[0];
+            assert_eq!(map[subset], val);
+        }
+    }
+
+    #[test]
+    fn test_index_set_map_default() {
+        let mut map: IndexSetMap<NaturalOrInfinite> = IndexSetMap::new(12, 2);
+        assert_eq!(map[vec![0, 11]], NaturalOrInfinite::default());
+        map[vec![11, 0]] = NaturalOrInfinite(42);
+        assert_eq!(map[vec![0, 11]], NaturalOrInfinite(42));
+    }
+
+    #[test]
+    fn test_index_set_maps() {
+        let mut maps: IndexSetMaps<usize> = IndexSetMaps::new(1);
+        let elements: Vec<_> = (0..10).collect();
+        for subset in non_trivial_subsets(&elements) {
+            if maps.len() < subset.len() {
+                maps.push(IndexSetMap::new(10, subset.len()));
+            }
+            let val = subset.iter().sum::<usize>() - subset[0] & 0xbadf00d_usize;
+            maps[subset] = val;
+        }
+        for subset in non_trivial_subsets(&elements) {
+            let val = subset.iter().sum::<usize>() - subset[0] & 0xbadf00d;
+            assert_eq!(maps[subset], val);
+        }
     }
 }
