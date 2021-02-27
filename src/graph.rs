@@ -1,3 +1,4 @@
+use crate::util::NaturalOrInfinite;
 use std::fmt::Display;
 use std::num::ParseIntError;
 use std::{error::Error, str::FromStr};
@@ -60,6 +61,16 @@ impl Graph {
 
     pub fn terminal_indices(&self) -> impl Iterator<Item = TerminalIndex> {
         0..self.num_terminals()
+    }
+
+    // TODO: efficient implementation
+    pub fn weight(&self, from: NodeIndex, to: NodeIndex) -> NaturalOrInfinite {
+        self.edges[from]
+            .iter()
+            .find(|x| x.to == to)
+            .map(|e| e.weight)
+            .map(NaturalOrInfinite::from)
+            .unwrap_or_else(NaturalOrInfinite::infinity)
     }
 }
 

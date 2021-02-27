@@ -17,6 +17,13 @@ impl ShortestPath {
         Self { path, distance }
     }
 
+    pub fn empty() -> Self {
+        Self {
+            path: vec![],
+            distance: 0.into(),
+        }
+    }
+
     pub fn distance(&self) -> NaturalOrInfinite {
         self.distance
     }
@@ -178,10 +185,7 @@ mod tests {
         );
         assert_eq!(
             spm[6][0],
-            ShortestPath::new(
-                vec![3, 2, 1, 0],
-                (30 + 50 + 30 + 15).into()
-            )
+            ShortestPath::new(vec![3, 2, 1, 0], (30 + 50 + 30 + 15).into())
         );
         assert_paths_equiv(&spm);
         Ok(())

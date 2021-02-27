@@ -1,5 +1,6 @@
 use std::cmp::Ordering;
 use std::error::Error;
+use std::fmt::{Debug, Formatter};
 use std::iter;
 use std::ops::{Add, Index, IndexMut};
 
@@ -358,6 +359,8 @@ pub(crate) fn sorted<T: Ord>(elements: &[T]) -> bool {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use crate::graph::tests::non_trivial_steiner;
+    use crate::shortest_paths::ShortestPathMatrix;
 
     #[test]
     fn test_natural_or_infinite() {
@@ -570,5 +573,24 @@ pub(crate) mod tests {
             let val = subset.iter().sum::<usize>() - subset[0] & 0xbadf00d;
             assert_eq!(maps[subset], val);
         }
+    }
+
+    #[test]
+    fn test_index_set_maps_shortest_paths() -> TestResult {
+        let graph = non_trivial_steiner()?;
+        let shortest_paths = ShortestPathMatrix::new(&graph);
+        let mut maps: IndexSetMaps<NaturalOrInfinite> = IndexSetMaps::new(2);
+        maps.push(IndexSetMap::new(graph.num_nodes(), 2));
+        let nodes = graph.node_indices().collect::<Vec<_>>();
+        for pair in combinations(&nodes, 2) {
+            let distance = shortest_paths[pair[0]][pair[1]].distance();
+            println!("====== map[{:?}] = {:?}", pair, distance);
+            maps[pair] = distance;
+        }
+        assert_eq!(shortest_paths[0][1].distance(), 15.into());
+        assert_eq!(shortest_paths[6][1].distance(), 110.into());
+        assert_eq!(maps[vec![0, 1]], 15.into());
+        assert_eq!(maps[vec![6, 1]], 110.into());
+        Ok(())
     }
 }

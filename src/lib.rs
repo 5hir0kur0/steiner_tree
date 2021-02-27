@@ -2,6 +2,8 @@
 
 mod graph;
 mod shortest_paths;
+mod steiner_tree;
 mod util;
 
 pub use graph::Graph;
+pub use steiner_tree::dreyfus_wagner;
