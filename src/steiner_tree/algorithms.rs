@@ -1,15 +1,15 @@
 use crate::graph::NodeIndex;
-use crate::shortest_paths::{ShortestPath, ShortestPathMatrix};
+use crate::shortest_paths::ShortestPathMatrix;
 use crate::steiner_tree::tree::EdgeTree;
 use crate::util::{
     combinations, non_trivial_subsets, sorted, IndexSetMap, IndexSetMaps, NaturalOrInfinite,
 };
 use crate::Graph;
 use std::cmp::min;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 /// Dreyfus-Wagner Algorithm for finding a minimal Steiner tree.
-pub fn dreyfus_wagner(graph: &Graph) -> NaturalOrInfinite {
+pub fn dreyfus_wagner(graph: &Graph) -> EdgeTree {
     let shortest_paths = ShortestPathMatrix::new(graph);
     // the index into maps has to be offset by 2 since the map with subset-size 2 is at index 0
     let mut maps: IndexSetMaps<NaturalOrInfinite> = IndexSetMaps::new(2);
@@ -56,25 +56,20 @@ pub fn dreyfus_wagner(graph: &Graph) -> NaturalOrInfinite {
             }
         }
     }
-    let tree = reverse_generate_tree(
-        dbg!(graph.terminals()),
+    let tree = reverse_build_tree(
+        graph.terminals(),
         &shortest_paths,
         &maps,
         graph,
         &non_leaf,
     );
-    let weight = tree.weight_in(graph);
-    println!(
-        "=========== tree weight: {:?} =========== maps weight: {:?} ============",
-        weight,
-        maps[graph.terminals().to_vec()]
-    );
-    weight
+    debug_assert_eq!(maps[graph.terminals().to_vec()], tree.weight_in(graph), "reconstructed tree does not have equal weight");
+    tree
 }
 
 /// Traverse the `non_leaf` and `maps` data structures in reverse order of creation to create
 /// the actual Steiner tree.
-fn reverse_generate_tree(
+fn reverse_build_tree(
     nodes: &[NodeIndex],
     shortest_paths: &ShortestPathMatrix,
     maps: &IndexSetMaps<NaturalOrInfinite>,
@@ -86,12 +81,7 @@ fn reverse_generate_tree(
     }
 
     let k = nodes[nodes.len() - 1];
-
     let without_k = &nodes[..nodes.len() - 1];
-    let mut min_edges = EdgeTree::empty();
-    let mut min_weight = NaturalOrInfinite::infinity();
-    let mut found_using_loop_1 = false;
-    let mut loop_2_x = None;
 
     if without_k.len() == 1 {
         let x = without_k[0];
@@ -100,45 +90,37 @@ fn reverse_generate_tree(
 
     for &x in without_k {
         let x_weight = shortest_paths[x][k].distance() + maps[without_k.to_vec()];
-        if x_weight < min_weight {
-            min_weight = x_weight;
-            min_edges = EdgeTree::new(&shortest_paths[x][k], x);
-            found_using_loop_1 = true;
+        if x_weight == maps[nodes.to_vec()] {
+            let mut tree = EdgeTree::new(&shortest_paths[x][k], x);
+            let rest = reverse_build_tree(without_k, shortest_paths, maps, graph, non_leaf);
+            tree.extend(&rest);
+            return tree;
         }
     }
 
     for x in nodes_not_in_subset(graph, without_k) {
         let x_weight = shortest_paths[x][k].distance() + non_leaf[x][&without_k.to_vec()];
-        if x_weight < min_weight {
-            min_weight = x_weight;
-            min_edges = EdgeTree::new(&shortest_paths[x][k], x);
-            found_using_loop_1 = false;
-            loop_2_x = Some(x);
-        }
-    }
-
-    if found_using_loop_1 {
-        let rest = reverse_generate_tree(without_k, shortest_paths, maps, graph, non_leaf);
-        min_edges.extend(&rest);
-    } else {
-        let x = loop_2_x.unwrap();
-        for subset in non_trivial_subsets(&without_k) {
-            let mut set2 = without_k.to_vec();
-            set2.retain(|e| !subset.contains(e));
-            set2.push(x);
-            let mut set1 = subset;
-            set1.push(x);
-            if maps[set1.clone()] + maps[set2.clone()] == non_leaf[x][&without_k.to_vec()] {
-                let tree1 = reverse_generate_tree(&set1, shortest_paths, maps, graph, non_leaf);
-                let tree2 = reverse_generate_tree(&set2, shortest_paths, maps, graph, non_leaf);
-                min_edges.extend(&tree1);
-                min_edges.extend(&tree2);
-                break;
+        if x_weight == maps[nodes.to_vec()] {
+            let mut tree = EdgeTree::new(&shortest_paths[x][k], x);
+            for subset in non_trivial_subsets(&without_k) {
+                let mut set2 = without_k.to_vec();
+                set2.retain(|e| !subset.contains(e));
+                set2.push(x);
+                let mut set1 = subset;
+                set1.push(x);
+                if maps[set1.clone()] + maps[set2.clone()] == non_leaf[x][&without_k.to_vec()] {
+                    let tree1 = reverse_build_tree(&set1, shortest_paths, maps, graph, non_leaf);
+                    let tree2 = reverse_build_tree(&set2, shortest_paths, maps, graph, non_leaf);
+                    tree.extend(&tree1);
+                    tree.extend(&tree2);
+                    break;
+                }
             }
+            return tree;
         }
     }
 
-    min_edges
+    unreachable!("bug in reverse_build_tree(...)")
 }
 
 /// Calculate minimal Steiner trees of the node sets `T ∪ {v}`
@@ -198,26 +180,54 @@ fn extend_index<T: Clone>(old_index: &[T], element: T) -> Vec<T> {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
+
     use super::*;
-    use crate::graph::tests::{non_trivial_steiner, small_test_graph};
+    use crate::graph::tests::{small_test_graph, steiner_example_paper, steiner_example_wiki};
     use crate::util::TestResult;
+
+    fn assert_contains_terminals(tree: &EdgeTree, terminals: &[NodeIndex]) {
+        let nodes = tree.nodes();
+        assert!(terminals.iter().all(|t| nodes.contains(t)),
+                "tree {:?} does not contain all terminals ({:?})", tree, terminals);
+    }
 
     #[test]
     fn test_dreyfus_wagner_trivial() -> TestResult {
         let trivial = small_test_graph()?;
         let result = dreyfus_wagner(&trivial);
-        assert_eq!(result, 3.into());
+        assert_eq!(result.weight_in(&trivial), 3.into());
+        assert_contains_terminals(&result, trivial.terminals());
         Ok(())
     }
 
     #[test]
-    fn test_dreyfus_wagner() -> TestResult {
-        let graph = non_trivial_steiner()?;
+    fn test_dreyfus_wagner_wiki_example() -> TestResult {
+        let graph = steiner_example_wiki()?;
         let result = dreyfus_wagner(&graph);
         assert_eq!(
-            result,
+            result.weight_in(&graph),
             NaturalOrInfinite::from(25 + 30 + 15 + 10 + 40 + 50 + 20)
         );
+        assert_contains_terminals(&result, graph.terminals());
+        assert_eq!(result.edges(), &[
+            (0, 4),
+            (4, 8),
+            (8, 10),
+            (10, 11),
+            (9, 10),
+            (7, 9),
+            (6, 7),
+        ].iter().copied().collect::<HashSet<_>>());
+        Ok(())
+    }
+
+    #[test]
+    fn test_dreyfus_wagner_paper_example() -> TestResult {
+        let graph = steiner_example_paper()?;
+        let tree = dreyfus_wagner(&graph);
+        assert_eq!(tree.weight_in(&graph), 5.into());
+        assert_contains_terminals(&tree, graph.terminals());
         Ok(())
     }
 

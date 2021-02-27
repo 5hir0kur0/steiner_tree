@@ -1,6 +1,6 @@
 use std::cmp::Ordering;
 use std::error::Error;
-use std::fmt::{Debug, Formatter};
+use std::fmt::Debug;
 use std::iter;
 use std::ops::{Add, Index, IndexMut};
 
@@ -359,7 +359,7 @@ pub(crate) fn sorted<T: Ord>(elements: &[T]) -> bool {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::graph::tests::non_trivial_steiner;
+    use crate::graph::tests::steiner_example_wiki;
     use crate::shortest_paths::ShortestPathMatrix;
 
     #[test]
@@ -577,7 +577,7 @@ pub(crate) mod tests {
 
     #[test]
     fn test_index_set_maps_shortest_paths() -> TestResult {
-        let graph = non_trivial_steiner()?;
+        let graph = steiner_example_wiki()?;
         let shortest_paths = ShortestPathMatrix::new(&graph);
         let mut maps: IndexSetMaps<NaturalOrInfinite> = IndexSetMaps::new(2);
         maps.push(IndexSetMap::new(graph.num_nodes(), 2));

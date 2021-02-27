@@ -2,7 +2,6 @@ use crate::graph::NodeIndex;
 use crate::util::NaturalOrInfinite;
 use crate::Graph;
 use std::cmp::Ordering;
-use std::iter;
 use std::mem;
 use std::ops::{Index, IndexMut, Range};
 
@@ -125,8 +124,9 @@ impl IndexMut<usize> for ShortestPathMatrix {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::graph::tests::{non_trivial_steiner, shortcut_test_graph, small_test_graph};
+    use crate::graph::tests::{steiner_example_wiki, shortcut_test_graph, small_test_graph};
     use crate::util::TestResult;
+    use std::iter;
 
     #[test]
     fn test_shortest_path_matrix_1() -> TestResult {
@@ -172,7 +172,7 @@ mod tests {
 
     #[test]
     fn test_shortest_path_matrix_3() -> TestResult {
-        let graph = non_trivial_steiner()?;
+        let graph = steiner_example_wiki()?;
         let spm = ShortestPathMatrix::new(&graph);
         assert_eq!(
             spm[11][0],

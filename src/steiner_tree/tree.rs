@@ -38,6 +38,18 @@ impl EdgeTree {
         }
         weight
     }
+
+    #[cfg(test)]
+    pub(crate) fn nodes(&self) -> HashSet<NodeIndex> {
+        self.edges.iter()
+            .flat_map(|&(a, b)| iter::once(a).chain(iter::once(b)))
+            .collect::<HashSet<_>>()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn edges(&self) -> &HashSet<(NodeIndex, NodeIndex)> {
+        &self.edges
+    }
 }
 
 #[cfg(test)]

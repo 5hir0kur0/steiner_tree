@@ -389,6 +389,7 @@ pub(crate) mod tests {
     ///    \ /
     ///     2
     /// ```
+    /// Terminals: `0, 2`
     pub(crate) fn small_test_graph() -> ParseResult<Graph> {
         "SECTION Graph\n\
         Nodes 3\n\
@@ -439,7 +440,7 @@ pub(crate) mod tests {
     }
 
     /// From [Wikipedia](https://de.wikipedia.org/wiki/Steinerbaumproblem#/media/Datei:Steinerbaum_Beispiel_Graph.svg).
-    pub(crate) fn non_trivial_steiner() -> ParseResult<Graph> {
+    pub(crate) fn steiner_example_wiki() -> ParseResult<Graph> {
         "SECTION Graph\n\
         Nodes 12\n\
         Edges 15\n\
@@ -467,6 +468,46 @@ pub(crate) mod tests {
         T 12\n\
         T 7\n\
         T 8\n\
+        END\n\
+
+        EOF\n"
+            .parse::<Graph>()
+    }
+
+    /// Example from the original paper by Dreyfus & Wagner.
+    pub(crate) fn steiner_example_paper() -> ParseResult<Graph> {
+        "SECTION Graph\n\
+        Nodes 7\n\
+        Edges 21\n\
+        E 1 2 2\n\
+        E 1 3 2\n\
+        E 1 4 2\n\
+        E 1 5 1\n\
+        E 1 6 1\n\
+        E 1 7 2\n\
+        E 2 3 2\n\
+        E 2 4 2\n\
+        E 2 5 2\n\
+        E 2 6 1\n\
+        E 2 7 2\n\
+        E 3 4 2\n\
+        E 3 5 2\n\
+        E 3 6 2\n\
+        E 3 7 1\n\
+        E 4 5 2\n\
+        E 4 6 1\n\
+        E 4 7 1\n\
+        E 5 6 2\n\
+        E 5 7 1\n\
+        E 6 7 1\n\
+        END\n\
+
+        SECTION Terminals\n\
+        Terminals 4\n\
+        T 1\n\
+        T 2\n\
+        T 3\n\
+        T 4\n\
         END\n\
 
         EOF\n"
