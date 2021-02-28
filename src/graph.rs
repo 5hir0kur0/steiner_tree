@@ -543,4 +543,16 @@ pub(crate) mod tests {
 
         Ok(())
     }
+
+    #[test]
+    fn test_weight() -> TestResult {
+        let graph = shortcut_test_graph()?;
+        assert_eq!(graph.weight(0, 2), 7.into());
+        assert_eq!(graph.weight(2, 0), 7.into());
+        assert_eq!(graph.weight(2, 3), 4.into());
+        assert_eq!(graph.weight(3, 2), 4.into());
+        assert_eq!(graph.weight(3, 0), NaturalOrInfinite::infinity());
+        assert_eq!(graph.weight(0, 3), NaturalOrInfinite::infinity());
+        Ok(())
+    }
 }

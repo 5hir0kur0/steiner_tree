@@ -1,126 +1,227 @@
 use crate::graph::NodeIndex;
 use crate::shortest_paths::ShortestPathMatrix;
 use crate::steiner_tree::tree::EdgeTree;
-use crate::util::{
-    combinations, non_trivial_subsets, sorted, IndexSetMap, IndexSetMaps, NaturalOrInfinite,
-};
+use crate::util::{combinations, non_trivial_subsets, sorted, NaturalOrInfinite};
 use crate::Graph;
 use std::cmp::min;
 use std::collections::HashMap;
 
+// The position in the outer vector encodes the non-leaf node.
+type NonLeafWeights = Vec<HashMap<Vec<NodeIndex>, NaturalOrInfinite>>;
+type MinimumWeights = HashMap<Vec<NodeIndex>, NaturalOrInfinite>;
+
 /// Dreyfus-Wagner Algorithm for finding a minimal Steiner tree.
 pub fn dreyfus_wagner(graph: &Graph) -> EdgeTree {
     let shortest_paths = ShortestPathMatrix::new(graph);
-    // the index into maps has to be offset by 2 since the map with subset-size 2 is at index 0
-    let mut maps: IndexSetMaps<NaturalOrInfinite> = IndexSetMaps::new(2);
-    // Subset of the S_k set in the original algorithm where k is not a leaf.
-    let mut non_leaf = vec![HashMap::new(); graph.num_nodes()];
-    maps.push(IndexSetMap::new(graph.num_nodes(), 2));
-    let nodes = graph.node_indices().collect::<Vec<_>>();
-    for pair in combinations(&nodes, 2) {
-        let distance = shortest_paths[pair[0]][pair[1]].distance();
-        maps[pair] = distance;
+    if graph.num_terminals() <= 1 {
+        return EdgeTree::empty();
     }
-    for subset_size in 2..graph.num_terminals() {
+    if graph.num_terminals() == 2 {
+        return EdgeTree::new(
+            &shortest_paths[graph.terminals()[0]][graph.terminals()[1]],
+            graph.terminals()[0],
+        );
+    }
+    // Indices need to be sorted in increasing order.
+    let mut minimum_weights: MinimumWeights = HashMap::new();
+    add_pair_steiner_trees(&mut minimum_weights, &shortest_paths, graph);
+    // Subset of the S_k set in the original algorithm where k is not a leaf.
+    let mut non_leaf: NonLeafWeights = vec![HashMap::new(); graph.num_nodes()];
+    // You can save some time by solving it for |T|-1 terminals and then doing the last one separately.
+    let terminals: &[NodeIndex] = &graph.terminals()[..graph.num_terminals() - 1];
+    for subset_size in 2..terminals.len() {
         // Steiner tree sizes of size `subset_size + 1` where the additional node is not a leaf.
-        calculate_non_leaf_steiner_trees(graph, &maps, &mut non_leaf, subset_size);
-        maps.push(IndexSetMap::new(graph.num_nodes(), subset_size + 1));
-        for subset in combinations(graph.terminals(), subset_size) {
+        calculate_non_leaf_steiner_trees(
+            graph,
+            terminals,
+            &minimum_weights,
+            &mut non_leaf,
+            subset_size,
+        );
+        for subset in combinations(terminals, subset_size) {
             for v in nodes_not_in_subset(graph, &subset) {
-                maps[extend_index(&subset, v)] = min(
-                    // v is connected to a node w of the tree (w in subset)
-                    subset
-                        .iter()
-                        .map(|&w| {
-                            println!("shortest_paths[{v}][{w}].distance() + maps[{subset:?}] = {shortest:?} + {maps:?} = {total:?}", shortest=shortest_paths[v][w].distance(), maps=maps[subset.to_vec()], v=v, w=w, subset=&subset, total=shortest_paths[v][w].distance() + maps[subset.to_vec()]);
-                            shortest_paths[v][w].distance()
-                        })
-                        .min()
-                        .unwrap_or_else(NaturalOrInfinite::infinity)
-                        + maps[subset.to_vec()],
-                    // v is connected to a Steiner node (w not in subset). Note that this means that
-                    // w must be a inner node in the tree.
-                    nodes_not_in_subset(graph, &subset)
-                        .map(|w| {
-                            println!("shortest_paths[{v}][{w}].distance() + sk[{w}][{subset:?}] = {total:?}",
-                                     total=shortest_paths[v][w].distance() + non_leaf[w][&subset],
-                                     v=v,
-                                     w=w,
-                                     subset=&subset,
-                            );
-                            shortest_paths[v][w].distance() + non_leaf[w][&subset]
-                        })
-                        .min()
-                        .unwrap_or_else(NaturalOrInfinite::infinity),
+                minimum_weights.insert(
+                    extend_index(&subset, v),
+                    weight_of_extended(
+                        graph,
+                        &shortest_paths,
+                        &minimum_weights,
+                        &non_leaf,
+                        &subset,
+                        v,
+                    ),
                 );
             }
         }
     }
+    // handle the terminal we removed at the beginning
+    let missing = *graph.terminals().last().expect("no terminals");
+    calculate_non_leaf_steiner_trees(
+        graph,
+        terminals,
+        &minimum_weights,
+        &mut non_leaf,
+        terminals.len(),
+    );
+    minimum_weights.insert(
+        extend_index(terminals, missing),
+        weight_of_extended(
+            graph,
+            &shortest_paths,
+            &minimum_weights,
+            &non_leaf,
+            terminals,
+            missing,
+        ),
+    );
     let tree = reverse_build_tree(
         graph.terminals(),
         &shortest_paths,
-        &maps,
+        &minimum_weights,
         graph,
         &non_leaf,
     );
-    debug_assert_eq!(maps[graph.terminals().to_vec()], tree.weight_in(graph), "reconstructed tree does not have equal weight");
+    assert_eq!(
+        minimum_weights[graph.terminals()],
+        tree.weight_in(graph),
+        "reconstructed tree does not have equal weight"
+    );
     tree
 }
 
-/// Traverse the `non_leaf` and `maps` data structures in reverse order of creation to create
+/// Add Steiner trees for all pairs of nodes. The Steiner trees just consist of the shortest paths between the nodes.
+fn add_pair_steiner_trees(
+    minimum_weights: &mut MinimumWeights,
+    shortest_paths: &ShortestPathMatrix,
+    graph: &Graph,
+) {
+    let nodes = graph.node_indices().collect::<Vec<_>>();
+    for pair in combinations(&nodes, 2) {
+        let distance = shortest_paths[pair[0]][pair[1]].distance();
+        debug_assert!(sorted(&pair));
+        minimum_weights.insert(pair, distance);
+    }
+}
+
+/// Compute the weight of the minimal Steiner tree when the terminals are extended to `subset ∪ {v}`,
+/// based on existing computations of all the smaller Steiner trees.
+fn weight_of_extended(
+    graph: &Graph,
+    shortest_paths: &ShortestPathMatrix,
+    minimum_weights: &MinimumWeights,
+    non_leaf: &NonLeafWeights,
+    subset: &[NodeIndex],
+    v: NodeIndex,
+) -> NaturalOrInfinite {
+    min(
+        // v is connected to a node w of the tree (w in subset)
+        subset
+            .iter()
+            .map(|&w| shortest_paths[v][w].distance())
+            .min()
+            .unwrap_or_else(NaturalOrInfinite::infinity)
+            + minimum_weights[subset],
+        // v is connected to a Steiner node (w not in subset). Note that this means that
+        // w must be a inner node in the tree.
+        nodes_not_in_subset(graph, subset)
+            .map(|w| shortest_paths[v][w].distance() + non_leaf[w][subset])
+            .min()
+            .unwrap_or_else(NaturalOrInfinite::infinity),
+    )
+}
+
+/// Traverse the `non_leaf` and `minimum_weights` data structures in reverse order of creation to create
 /// the actual Steiner tree.
 fn reverse_build_tree(
     nodes: &[NodeIndex],
     shortest_paths: &ShortestPathMatrix,
-    maps: &IndexSetMaps<NaturalOrInfinite>,
+    minimum_weights: &MinimumWeights,
     graph: &Graph,
     non_leaf: &[HashMap<Vec<NodeIndex>, NaturalOrInfinite>],
 ) -> EdgeTree {
     if nodes.len() <= 1 {
         return EdgeTree::empty();
     }
-
-    let k = nodes[nodes.len() - 1];
-    let without_k = &nodes[..nodes.len() - 1];
-
-    if without_k.len() == 1 {
-        let x = without_k[0];
-        return EdgeTree::new(&shortest_paths[x][k], x);
+    if nodes.len() == 2 {
+        return EdgeTree::new(&shortest_paths[nodes[0]][nodes[1]], nodes[0]);
     }
-
-    for &x in without_k {
-        let x_weight = shortest_paths[x][k].distance() + maps[without_k.to_vec()];
-        if x_weight == maps[nodes.to_vec()] {
-            let mut tree = EdgeTree::new(&shortest_paths[x][k], x);
-            let rest = reverse_build_tree(without_k, shortest_paths, maps, graph, non_leaf);
-            tree.extend(&rest);
-            return tree;
-        }
-    }
-
-    for x in nodes_not_in_subset(graph, without_k) {
-        let x_weight = shortest_paths[x][k].distance() + non_leaf[x][&without_k.to_vec()];
-        if x_weight == maps[nodes.to_vec()] {
-            let mut tree = EdgeTree::new(&shortest_paths[x][k], x);
-            for subset in non_trivial_subsets(&without_k) {
-                let mut set2 = without_k.to_vec();
-                set2.retain(|e| !subset.contains(e));
-                set2.push(x);
-                let mut set1 = subset;
-                set1.push(x);
-                if maps[set1.clone()] + maps[set2.clone()] == non_leaf[x][&without_k.to_vec()] {
-                    let tree1 = reverse_build_tree(&set1, shortest_paths, maps, graph, non_leaf);
-                    let tree2 = reverse_build_tree(&set2, shortest_paths, maps, graph, non_leaf);
-                    tree.extend(&tree1);
-                    tree.extend(&tree2);
-                    break;
+    // If all nodes in `nodes` are terminals then the biggest one was added last.
+    let mut the_one = if nodes.iter().all(|n| graph.terminals().contains(n)) {
+        *nodes.last().unwrap()
+    } else {
+        // otherwise there is exactly one which is not a terminal
+        let non_terminal = nodes
+            .iter()
+            .copied()
+            .filter(|n| !graph.terminals().contains(n))
+            .collect::<Vec<_>>();
+        debug_assert_eq!(non_terminal.len(), 1);
+        *non_terminal.last().unwrap()
+    };
+    let mut the_rest = nodes
+        .iter()
+        .copied()
+        .filter(|&n| n != the_one)
+        .collect::<Vec<_>>();
+    the_rest.sort_unstable();
+    debug_assert_eq!(the_rest.len(), nodes.len() - 1);
+    // let mut trees = vec![];
+    for k in graph.node_indices() {
+        if the_rest.binary_search(&k).is_err() {
+            if shortest_paths[k][the_one].distance() + non_leaf[k][&the_rest]
+                == minimum_weights[nodes]
+            {
+                for subset in non_trivial_subsets(&the_rest) {
+                    let mut subset_and_k = extend_index(&subset, k);
+                    let mut complement_and_k = extend_index_difference(&the_rest, &subset, k);
+                    debug_assert_ne!(non_leaf[k][&the_rest], NaturalOrInfinite::infinity());
+                    if minimum_weights[&subset_and_k] + minimum_weights[&complement_and_k]
+                        == non_leaf[k][&the_rest]
+                    {
+                        let tree1 = reverse_build_tree(
+                            &subset_and_k,
+                            shortest_paths,
+                            minimum_weights,
+                            graph,
+                            non_leaf,
+                        );
+                        if tree1.is_empty() {
+                            continue;
+                        }
+                        let tree2 = reverse_build_tree(
+                            &complement_and_k,
+                            shortest_paths,
+                            minimum_weights,
+                            graph,
+                            non_leaf,
+                        );
+                        if tree2.is_empty() {
+                            continue;
+                        }
+                        let mut tree = EdgeTree::new(&shortest_paths[k][the_one], k);
+                        tree.extend(&tree1);
+                        tree.extend(&tree2);
+                        // trees.push(tree);
+                        return tree;
+                    }
                 }
             }
-            return tree;
+        } else {
+            if shortest_paths[k][the_one].distance() + minimum_weights[&the_rest]
+                == minimum_weights[nodes]
+            {
+                let mut tree =
+                    reverse_build_tree(&the_rest, shortest_paths, minimum_weights, graph, non_leaf);
+                if !tree.is_empty() {
+                    tree.extend(&EdgeTree::new(&shortest_paths[k][the_one], k));
+                    return tree;
+                }
+                // trees.push(tree);
+            }
         }
     }
-
-    unreachable!("bug in reverse_build_tree(...)")
+    // trees.into_iter().min_by_key(|t| t.weight_in(graph)).unwrap()
+    return EdgeTree::empty();
 }
 
 /// Calculate minimal Steiner trees of the node sets `T ∪ {v}`
@@ -128,23 +229,28 @@ fn reverse_build_tree(
 /// `v` is **not a leaf**.
 fn calculate_non_leaf_steiner_trees(
     graph: &Graph,
-    maps: &IndexSetMaps<NaturalOrInfinite>,
-    sk: &mut Vec<HashMap<Vec<NodeIndex>, NaturalOrInfinite>>,
+    terminals: &[NodeIndex],
+    minimum_weights: &MinimumWeights,
+    non_leaf: &mut NonLeafWeights,
     subset_size: usize,
 ) {
-    for subset in combinations(graph.terminals(), subset_size) {
+    for subset in combinations(terminals, subset_size) {
         for v in nodes_not_in_subset(graph, &subset) {
-            sk[v].insert(
+            debug_assert!(sorted(&subset));
+            non_leaf[v].insert(
                 subset.clone(),
                 non_trivial_subsets(&subset)
+                    // Since we're always adding the value of the set and the one of its complement
+                    // the values we get for choosing the set itself and its complement as
+                    // `sub_subset` are equal. Because of the way subsets are enumerated by
+                    // `non_trivial_subsets()` it suffices to take the first half of the values.
+                    .take((2_usize.pow(subset.len() as u32) - 2) / 2)
                     .map(|sub_subset| {
                         let sub_subset_and_v = extend_index(&sub_subset, v);
-                        let mut sub_subset_complement_and_v = subset.to_vec();
-                        debug_assert!(sorted(&sub_subset));
-                        sub_subset_complement_and_v
-                            .retain(|e| sub_subset.binary_search(e).is_err());
-                        sub_subset_complement_and_v.push(v);
-                        maps[sub_subset_and_v] + maps[sub_subset_complement_and_v]
+                        let sub_subset_complement_and_v =
+                            extend_index_difference(&subset, &sub_subset, v);
+                        minimum_weights[&sub_subset_and_v]
+                            + minimum_weights[&sub_subset_complement_and_v]
                     })
                     .min()
                     .unwrap_or_else(NaturalOrInfinite::infinity),
@@ -172,10 +278,29 @@ where
 }
 
 /// Calculate `old_index ∪ {element}`, cloning `old_index`.
-fn extend_index<T: Clone>(old_index: &[T], element: T) -> Vec<T> {
-    let mut v = old_index.to_vec();
-    v.push(element);
-    v
+/// Requires that `element ∉ old_index`.
+fn extend_index(old_index: &[NodeIndex], element: NodeIndex) -> Vec<NodeIndex> {
+    let mut res = old_index.to_vec();
+    debug_assert!(!old_index.contains(&element));
+    res.push(element);
+    res.sort_unstable();
+    res
+}
+
+/// Calculate `(set \ other) ∪ {element}`, cloning `old_index`.
+/// Requires that `element ∉ set` and `other` to be sorted.
+fn extend_index_difference(
+    set: &[NodeIndex],
+    other: &[NodeIndex],
+    element: NodeIndex,
+) -> Vec<NodeIndex> {
+    let mut complement_and_el = set.to_vec();
+    debug_assert!(sorted(other));
+    debug_assert!(!set.contains(&element));
+    complement_and_el.retain(|e| other.binary_search(e).is_err());
+    complement_and_el.push(element);
+    complement_and_el.sort_unstable();
+    complement_and_el
 }
 
 #[cfg(test)]
@@ -188,8 +313,12 @@ mod tests {
 
     fn assert_contains_terminals(tree: &EdgeTree, terminals: &[NodeIndex]) {
         let nodes = tree.nodes();
-        assert!(terminals.iter().all(|t| nodes.contains(t)),
-                "tree {:?} does not contain all terminals ({:?})", tree, terminals);
+        assert!(
+            terminals.iter().all(|t| nodes.contains(t)),
+            "tree {:?} does not contain all terminals ({:?})",
+            tree,
+            terminals
+        );
     }
 
     #[test]
@@ -210,15 +339,13 @@ mod tests {
             NaturalOrInfinite::from(25 + 30 + 15 + 10 + 40 + 50 + 20)
         );
         assert_contains_terminals(&result, graph.terminals());
-        assert_eq!(result.edges(), &[
-            (0, 4),
-            (4, 8),
-            (8, 10),
-            (10, 11),
-            (9, 10),
-            (7, 9),
-            (6, 7),
-        ].iter().copied().collect::<HashSet<_>>());
+        assert_eq!(
+            result.edges(),
+            &[(0, 4), (4, 8), (8, 10), (10, 11), (9, 10), (7, 9), (6, 7),]
+                .iter()
+                .copied()
+                .collect::<HashSet<_>>()
+        );
         Ok(())
     }
 

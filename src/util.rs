@@ -13,7 +13,7 @@ pub(crate) type TestResult = GenericResult<()>;
 /// Numerical type that can either be an unsigned number or positive infinity.
 // infinity is encoded as `-1`; all other negative values are illegal
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub struct NaturalOrInfinite(i64);
+pub struct NaturalOrInfinite(i32);
 
 impl PartialOrd for NaturalOrInfinite {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
@@ -55,7 +55,7 @@ impl NaturalOrInfinite {
 
 impl From<u32> for NaturalOrInfinite {
     fn from(val: u32) -> Self {
-        NaturalOrInfinite(val as i64)
+        NaturalOrInfinite(val as i32)
     }
 }
 
@@ -198,7 +198,14 @@ pub struct Vector<T: Default + Clone> {
 impl<T: Default + Clone> Vector<T> {
     pub fn new(dimensions: Vec<usize>) -> Self {
         let size = dimensions.iter().product();
-        let vec = vec![T::default(); size];
+        let mut vec = Vec::new();
+        // This vector is impossible to grow through the current API so it shouldn't reserve more
+        // space for future insertions.
+        vec.reserve_exact(size);
+        for _ in 0..size {
+            vec.push(T::default());
+        }
+        vec.shrink_to_fit();
         let products = (0..dimensions.len())
             .map(|d| dimensions[d + 1..].iter().product())
             .collect();
@@ -250,7 +257,6 @@ impl<T: Default + Clone> IndexMut<&[usize]> for Vector<T> {
 /// case the index value is moved.
 pub struct IndexSetMap<T: Copy + Default> {
     map: Vector<T>,
-    #[cfg(debug_assertions)]
     subset_size: usize,
 }
 
@@ -272,7 +278,6 @@ impl<T: Copy + Default> IndexSetMap<T> {
         }
     }
 
-    #[cfg(debug_assertions)]
     pub fn subset_size(&self) -> usize {
         self.subset_size
     }
@@ -346,7 +351,6 @@ impl<T: Copy + Default> IndexMut<Vec<usize>> for IndexSetMaps<T> {
     }
 }
 
-#[cfg(debug_assertions)]
 pub(crate) fn sorted<T: Ord>(elements: &[T]) -> bool {
     for (a, b) in elements.iter().zip(elements.iter().skip(1)) {
         if a > b {

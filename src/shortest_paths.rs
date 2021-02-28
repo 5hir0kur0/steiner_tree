@@ -124,7 +124,7 @@ impl IndexMut<usize> for ShortestPathMatrix {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::graph::tests::{steiner_example_wiki, shortcut_test_graph, small_test_graph};
+    use crate::graph::tests::{shortcut_test_graph, small_test_graph, steiner_example_wiki};
     use crate::util::TestResult;
     use std::iter;
 

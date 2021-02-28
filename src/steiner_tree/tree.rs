@@ -27,6 +27,10 @@ impl EdgeTree {
         }
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.edges.is_empty()
+    }
+
     pub fn extend(&mut self, other: &Self) {
         self.edges.extend(other.edges.iter());
     }
@@ -41,7 +45,8 @@ impl EdgeTree {
 
     #[cfg(test)]
     pub(crate) fn nodes(&self) -> HashSet<NodeIndex> {
-        self.edges.iter()
+        self.edges
+            .iter()
             .flat_map(|&(a, b)| iter::once(a).chain(iter::once(b)))
             .collect::<HashSet<_>>()
     }
