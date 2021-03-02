@@ -122,8 +122,8 @@ impl ShortestPathMatrix {
             paths: vec![ShortestPath::default(); n * n],
             dimension: n,
         };
-        // This could be done more efficiently as we don't actually need the shortest paths for
-        // all pairs.
+        // TODO: This could be done more efficiently as we don't actually need the shortest paths for
+        // all pairs. E.g. Dijkstra.
         let spm = Self::new(graph);
         for from_idx in 0..graph.num_terminals() {
             for to_idx in 0..graph.num_terminals() {

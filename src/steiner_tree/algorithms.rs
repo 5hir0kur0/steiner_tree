@@ -306,30 +306,43 @@ fn extend_index_difference(
 }
 
 pub fn kou_et_al_steiner_approximation(graph: &Graph) -> EdgeTree {
+    // Construct a complete graph from the steiner points (edge weights = distances in original graph).
     let complete_edges = ShortestPathMatrix::terminal_distances(graph);
+    // Compute its minimum spanning tree.
     let complete_mst = prim_spanning_tree(
         complete_edges.dimension(),
         |from, to| complete_edges[from][to].distance(),
         |n| (0..complete_edges.dimension()).filter(move |&x| x != n),
         0,
     );
+    // Construct a subgaph of the original graph (represented here as a set of
+    // edges) that contains all nodes/edges on the original shortest paths between the nodes in
+    // the MST above.
     let mut subgraph = HashSet::new();
     for &(from_idx, to_idx) in complete_mst.edges() {
         let (from, to) = (graph.terminals()[from_idx], graph.terminals()[to_idx]);
         #[cfg(debug_assertions)]
-            {
-                let path_edges = complete_edges[from_idx][to_idx].edges_on_path(from).collect::<Vec<_>>();
-                debug_assert_eq!(path_edges[0].0, from);
-                debug_assert_eq!(path_edges.last().unwrap().1, to);
-            }
-        complete_edges[from_idx][to_idx].edges_on_path(from).for_each(|edge| {
-            subgraph.insert(edge);
-        });
+        {
+            let path_edges = complete_edges[from_idx][to_idx]
+                .edges_on_path(from)
+                .collect::<Vec<_>>();
+            // could be in .0 or .1 since edges are undirected (and therefore represented by ordered tuples)
+            debug_assert!(path_edges[0].0 == from || path_edges[0].1 == from);
+            let last = path_edges.last().unwrap();
+            debug_assert!(last.1 == to || last.0 == to);
+        }
+        complete_edges[from_idx][to_idx]
+            .edges_on_path(from)
+            .for_each(|edge| {
+                subgraph.insert(edge);
+            });
     }
-    let subgraph_nodes = subgraph
-        .iter()
-        .flat_map(|&(a, b)| iter::once(a).chain(iter::once(b)))
-        .collect::<HashSet<_>>();
+    // let subgraph_nodes = subgraph
+    //     .iter()
+    //     .flat_map(|&(a, b)| iter::once(a).chain(iter::once(b)))
+    //     .collect::<HashSet<_>>();
+
+    // Compute a MST of the subgraph.
     let mut subgraph_mst = prim_spanning_tree(
         graph.num_nodes(),
         |from, to| {
@@ -344,16 +357,18 @@ pub fn kou_et_al_steiner_approximation(graph: &Graph) -> EdgeTree {
             graph
                 .neighbors(n)
                 .map(|&Edge { to, .. }| to)
-                .filter(move |to| {
-                    subgraph.contains(&edge(n, *to))
-                })
+                .filter(move |to| subgraph.contains(&edge(n, *to)))
         },
         graph.terminals()[0],
     );
+    // If there are leaves that are non-terminal nodes then the weight can be
+    // decreased by removing the respective edges.
     remove_non_terminal_leaves(&mut subgraph_mst, graph);
     subgraph_mst
 }
 
+/// Removes paths in the tree that lead to leaves which are not terminal nodes.
+/// After this function returns, all leaves of the tree are terminal nodes.
 fn remove_non_terminal_leaves(subgraph_mst: &mut EdgeTree, graph: &Graph) {
     let mut encountered: HashMap<NodeIndex, (u32, (NodeIndex, NodeIndex))> = HashMap::new();
     let mut non_terminal_leaf_found = true;
@@ -437,7 +452,10 @@ mod tests {
     use std::collections::HashSet;
 
     use super::*;
-    use crate::graph::tests::{diamond_test_graph, small_test_graph, steiner_example_paper, steiner_example_wiki, shortcut_test_graph};
+    use crate::graph::tests::{
+        diamond_test_graph, shortcut_test_graph, small_test_graph, steiner_example_paper,
+        steiner_example_wiki,
+    };
     use crate::util::TestResult;
 
     fn assert_contains_terminals(tree: &EdgeTree, terminals: &[NodeIndex]) {
@@ -451,7 +469,7 @@ mod tests {
     }
 
     fn assert_leaves_are_terminals(tree: &EdgeTree, terminals: &[NodeIndex]) {
-        let leaves = find_leaves(tree);
+        let leaves = tree.find_leaves();
         for leaf in leaves {
             assert!(terminals.contains(&leaf));
         }
@@ -570,7 +588,10 @@ mod tests {
         assert_eq!(tree.weight_in(&graph), 4.into());
         assert_eq!(
             tree.edges(),
-            &[(0, 1), (1, 2), (1, 3)].iter().copied().collect::<HashSet<_>>()
+            &[(0, 1), (1, 2), (1, 3)]
+                .iter()
+                .copied()
+                .collect::<HashSet<_>>()
         );
         Ok(())
     }
@@ -588,12 +609,15 @@ mod tests {
             let approx = kou_et_al_steiner_approximation(graph);
             assert_plausible_steiner_tree(&exact, &graph);
             assert_plausible_steiner_tree(&approx, &graph);
-            let leaves = find_leaves(&exact).len();
+            let leaves = exact.find_leaves().len();
             let exact_weight = exact.weight_in(graph).finite_value();
             let approx_weight = approx.weight_in(graph).finite_value();
-            println!("exact_weight = {}, approx_weight = {}, leaves = {:?}", exact_weight, approx_weight, leaves);
+            println!(
+                "exact_weight = {}, approx_weight = {}, leaves = {:?}",
+                exact_weight, approx_weight, leaves
+            );
             assert!(
-                (approx_weight as f64) / (exact_weight as f64) <= (2.0 - (2.0/(leaves as f64)))
+                (approx_weight as f64) / (exact_weight as f64) <= (2.0 - (2.0 / (leaves as f64)))
             );
         }
         Ok(())
@@ -602,34 +626,48 @@ mod tests {
     #[test]
     fn test_count_leaves() {
         let mut tree = EdgeTree::empty();
-        assert!(find_leaves(&tree).is_empty());
+        assert!(tree.find_leaves().is_empty());
         tree.insert((0, 1));
-        assert_eq!(find_leaves(&tree), [0, 1].iter().copied().collect::<HashSet<_>>());
+        assert_eq!(
+            tree.find_leaves(),
+            [0, 1].iter().copied().collect::<HashSet<_>>()
+        );
         tree.insert((1, 2));
-        assert_eq!(find_leaves(&tree), [0, 2].iter().copied().collect::<HashSet<_>>());
+        assert_eq!(
+            tree.find_leaves(),
+            [0, 2].iter().copied().collect::<HashSet<_>>()
+        );
         tree.insert((1, 3));
-        assert_eq!(find_leaves(&tree), [0, 2, 3].iter().copied().collect::<HashSet<_>>());
+        assert_eq!(
+            tree.find_leaves(),
+            [0, 2, 3].iter().copied().collect::<HashSet<_>>()
+        );
         tree.insert((2, 3));
-        assert_eq!(find_leaves(&tree), [0].iter().copied().collect::<HashSet<_>>());
+        assert_eq!(
+            tree.find_leaves(),
+            [0].iter().copied().collect::<HashSet<_>>()
+        );
     }
 
-
-    fn find_leaves(tree: &EdgeTree) -> HashSet<NodeIndex> {
-        let mut encountered: HashMap<NodeIndex, (u32, (NodeIndex, NodeIndex))> = HashMap::new();
-        let mut num_leaves = 0;
-        for &(from, to) in tree.edges() {
-            let edge = (from, to);
-            for &n in &[from, to] {
-                encountered.entry(n).or_insert((0, edge)).0 += 1;
-            }
-        }
-        let mut leaves = HashSet::new();
-        for node in encountered.keys() {
-            let (count, edge) = encountered[node];
-            if count == 1 {
-                leaves.insert(*node);
-            }
-        }
-        leaves
+    #[test]
+    fn test_remove_non_terminal_leaves() -> TestResult {
+        let graph = steiner_example_wiki()?;
+        let mut tree = EdgeTree::empty();
+        [(0, 4), (4, 8), (8, 10), (10, 11), (9, 10), (7, 9), (6, 7),
+         // unnecessary edges:
+         (5, 7),
+         (0, 1),
+         (1, 2),
+         (2, 3),
+        ].iter().for_each(|&edge| tree.insert(edge));
+        remove_non_terminal_leaves(&mut tree, &graph);
+        assert_eq!(
+            tree.edges(),
+            &[(0, 4), (4, 8), (8, 10), (10, 11), (9, 10), (7, 9), (6, 7),]
+                .iter()
+                .copied()
+                .collect::<HashSet<_>>()
+        );
+        Ok(())
     }
 }

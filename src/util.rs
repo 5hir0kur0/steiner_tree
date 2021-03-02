@@ -66,9 +66,10 @@ impl Default for NaturalOrInfinite {
     }
 }
 
-#[cfg(test)]
 impl NaturalOrInfinite {
-    pub(crate) fn finite_value(&self) -> u32 {
+    /// Returns the value as a `u32` if it is finite.
+    /// Panics in case `self == NaturalOrInfinite::infinity()`.
+    pub fn finite_value(&self) -> u32 {
         if self.0 < 0 {
             panic!("infinite value");
         }

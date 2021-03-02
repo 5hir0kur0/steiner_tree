@@ -1,5 +1,2 @@
-mod algorithms;
-mod tree;
-
-pub use algorithms::dreyfus_wagner;
-pub use tree::EdgeTree;
+pub mod algorithms;
+pub mod tree;
