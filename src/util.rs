@@ -1,3 +1,4 @@
+use crate::graph::NodeIndex;
 use std::cmp::Ordering;
 use std::error::Error;
 use std::fmt::Debug;
@@ -62,6 +63,16 @@ impl From<u32> for NaturalOrInfinite {
 impl Default for NaturalOrInfinite {
     fn default() -> Self {
         NaturalOrInfinite::infinity()
+    }
+}
+
+#[cfg(test)]
+impl NaturalOrInfinite {
+    pub(crate) fn finite_value(&self) -> u32 {
+        if self.0 < 0 {
+            panic!("infinite value");
+        }
+        self.0 as u32
     }
 }
 
@@ -360,6 +371,33 @@ pub(crate) fn sorted<T: Ord>(elements: &[T]) -> bool {
     true
 }
 
+#[derive(Debug, PartialEq, Eq)]
+pub struct PriorityValuePair<P: Ord, V: Ord> {
+    pub value: V,
+    pub priority: P,
+}
+
+impl<P: Ord, V: Ord> Ord for PriorityValuePair<P, V> {
+    fn cmp(&self, other: &Self) -> Ordering {
+        // compare node as well for consistency with PartialEq/Eq
+        self.priority
+            .cmp(&other.priority)
+            .then_with(|| self.value.cmp(&other.value))
+    }
+}
+
+impl<P: Ord, V: Ord> PartialOrd for PriorityValuePair<P, V> {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+/// Returns an edge `(a, b)` such that `a < b`.
+pub fn edge(from: NodeIndex, to: NodeIndex) -> (NodeIndex, NodeIndex) {
+    assert_ne!(from, to);
+    (from.min(to), from.max(to))
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
@@ -588,7 +626,7 @@ pub(crate) mod tests {
         let nodes = graph.node_indices().collect::<Vec<_>>();
         for pair in combinations(&nodes, 2) {
             let distance = shortest_paths[pair[0]][pair[1]].distance();
-            println!("====== map[{:?}] = {:?}", pair, distance);
+            println!("map[{:?}] = {:?}", pair, distance);
             maps[pair] = distance;
         }
         assert_eq!(shortest_paths[0][1].distance(), 15.into());

@@ -13,11 +13,7 @@ pub struct EdgeTree {
 
 impl EdgeTree {
     pub fn new(path: &ShortestPath, start: NodeIndex) -> Self {
-        let edges = iter::once(start)
-            .chain(path.path().iter().copied())
-            .zip(path.path().iter().copied())
-            .map(|(a, b)| (a.min(b), a.max(b)))
-            .collect::<HashSet<_>>();
+        let edges = path.edges_on_path(start).collect::<HashSet<_>>();
         Self { edges }
     }
 
@@ -33,6 +29,18 @@ impl EdgeTree {
 
     pub fn extend(&mut self, other: &Self) {
         self.edges.extend(other.edges.iter());
+    }
+
+    /// Requires that `a < b` where `edge = (a, b)`.
+    pub fn insert(&mut self, edge: (NodeIndex, NodeIndex)) {
+        assert!(edge.0 < edge.1);
+        self.edges.insert(edge);
+    }
+
+    /// Requires that `a < b` where `edge = (a, b)`.
+    pub fn remove(&mut self, edge: (NodeIndex, NodeIndex)) {
+        assert!(edge.0 < edge.1);
+        self.edges.remove(&edge);
     }
 
     pub fn weight_in(&self, graph: &Graph) -> NaturalOrInfinite {
@@ -51,7 +59,21 @@ impl EdgeTree {
             .collect::<HashSet<_>>()
     }
 
+
     #[cfg(test)]
+    pub(crate) fn neighbors(&self, node: NodeIndex) -> HashSet<NodeIndex> {
+        let mut neighbors = HashSet::new();
+        for &(from, to) in self.edges() {
+            if from == node {
+                neighbors.insert(to);
+            }
+            if to == node {
+                neighbors.insert(from);
+            }
+        }
+        neighbors
+    }
+
     pub(crate) fn edges(&self) -> &HashSet<(NodeIndex, NodeIndex)> {
         &self.edges
     }

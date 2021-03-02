@@ -1,10 +1,13 @@
-use crate::graph::NodeIndex;
+use crate::graph::{Edge, NodeIndex};
 use crate::shortest_paths::ShortestPathMatrix;
 use crate::steiner_tree::tree::EdgeTree;
-use crate::util::{combinations, non_trivial_subsets, sorted, NaturalOrInfinite};
+use crate::util::{
+    combinations, edge, non_trivial_subsets, sorted, NaturalOrInfinite, PriorityValuePair,
+};
 use crate::Graph;
-use std::cmp::min;
-use std::collections::HashMap;
+use std::cmp::{min, Reverse};
+use std::collections::{BinaryHeap, HashMap, HashSet};
+use std::iter;
 
 // The position in the outer vector encodes the non-leaf node.
 type NonLeafWeights = Vec<HashMap<Vec<NodeIndex>, NaturalOrInfinite>>;
@@ -146,7 +149,7 @@ fn reverse_build_tree(
         return EdgeTree::new(&shortest_paths[nodes[0]][nodes[1]], nodes[0]);
     }
     // If all nodes in `nodes` are terminals then the biggest one was added last.
-    let mut the_one = if nodes.iter().all(|n| graph.terminals().contains(n)) {
+    let the_one = if nodes.iter().all(|n| graph.terminals().contains(n)) {
         *nodes.last().unwrap()
     } else {
         // otherwise there is exactly one which is not a terminal
@@ -158,6 +161,7 @@ fn reverse_build_tree(
         debug_assert_eq!(non_terminal.len(), 1);
         *non_terminal.last().unwrap()
     };
+    // the nodes other than `the_one`
     let mut the_rest = nodes
         .iter()
         .copied()
@@ -165,15 +169,16 @@ fn reverse_build_tree(
         .collect::<Vec<_>>();
     the_rest.sort_unstable();
     debug_assert_eq!(the_rest.len(), nodes.len() - 1);
-    // let mut trees = vec![];
+    // From here it is basically the same computation that was used to compute the
+    // `minimum_weights`, just "in reverse" (i.e. top-down instead of bottom-up).
     for k in graph.node_indices() {
         if the_rest.binary_search(&k).is_err() {
             if shortest_paths[k][the_one].distance() + non_leaf[k][&the_rest]
                 == minimum_weights[nodes]
             {
                 for subset in non_trivial_subsets(&the_rest) {
-                    let mut subset_and_k = extend_index(&subset, k);
-                    let mut complement_and_k = extend_index_difference(&the_rest, &subset, k);
+                    let subset_and_k = extend_index(&subset, k);
+                    let complement_and_k = extend_index_difference(&the_rest, &subset, k);
                     debug_assert_ne!(non_leaf[k][&the_rest], NaturalOrInfinite::infinity());
                     if minimum_weights[&subset_and_k] + minimum_weights[&complement_and_k]
                         == non_leaf[k][&the_rest]
@@ -201,7 +206,6 @@ fn reverse_build_tree(
                         let mut tree = EdgeTree::new(&shortest_paths[k][the_one], k);
                         tree.extend(&tree1);
                         tree.extend(&tree2);
-                        // trees.push(tree);
                         return tree;
                     }
                 }
@@ -216,11 +220,9 @@ fn reverse_build_tree(
                     tree.extend(&EdgeTree::new(&shortest_paths[k][the_one], k));
                     return tree;
                 }
-                // trees.push(tree);
             }
         }
     }
-    // trees.into_iter().min_by_key(|t| t.weight_in(graph)).unwrap()
     return EdgeTree::empty();
 }
 
@@ -303,12 +305,139 @@ fn extend_index_difference(
     complement_and_el
 }
 
+pub fn kou_et_al_steiner_approximation(graph: &Graph) -> EdgeTree {
+    let complete_edges = ShortestPathMatrix::terminal_distances(graph);
+    let complete_mst = prim_spanning_tree(
+        complete_edges.dimension(),
+        |from, to| complete_edges[from][to].distance(),
+        |n| (0..complete_edges.dimension()).filter(move |&x| x != n),
+        0,
+    );
+    let mut subgraph = HashSet::new();
+    for &(from_idx, to_idx) in complete_mst.edges() {
+        let (from, to) = (graph.terminals()[from_idx], graph.terminals()[to_idx]);
+        #[cfg(debug_assertions)]
+            {
+                let path_edges = complete_edges[from_idx][to_idx].edges_on_path(from).collect::<Vec<_>>();
+                debug_assert_eq!(path_edges[0].0, from);
+                debug_assert_eq!(path_edges.last().unwrap().1, to);
+            }
+        complete_edges[from_idx][to_idx].edges_on_path(from).for_each(|edge| {
+            subgraph.insert(edge);
+        });
+    }
+    let subgraph_nodes = subgraph
+        .iter()
+        .flat_map(|&(a, b)| iter::once(a).chain(iter::once(b)))
+        .collect::<HashSet<_>>();
+    let mut subgraph_mst = prim_spanning_tree(
+        graph.num_nodes(),
+        |from, to| {
+            if subgraph.contains(&edge(from, to)) {
+                graph.weight(from, to)
+            } else {
+                NaturalOrInfinite::infinity()
+            }
+        },
+        |n| {
+            let subgraph = &subgraph;
+            graph
+                .neighbors(n)
+                .map(|&Edge { to, .. }| to)
+                .filter(move |to| {
+                    subgraph.contains(&edge(n, *to))
+                })
+        },
+        graph.terminals()[0],
+    );
+    remove_non_terminal_leaves(&mut subgraph_mst, graph);
+    subgraph_mst
+}
+
+fn remove_non_terminal_leaves(subgraph_mst: &mut EdgeTree, graph: &Graph) {
+    let mut encountered: HashMap<NodeIndex, (u32, (NodeIndex, NodeIndex))> = HashMap::new();
+    let mut non_terminal_leaf_found = true;
+    while non_terminal_leaf_found {
+        encountered.clear();
+        for &(from, to) in subgraph_mst.edges() {
+            let edge = (from, to);
+            for &n in &[from, to] {
+                encountered.entry(n).or_insert((0, edge)).0 += 1;
+            }
+        }
+        non_terminal_leaf_found = false;
+        for node in encountered.keys() {
+            let (count, edge) = encountered[node];
+            if count == 1 && !graph.terminals().contains(node) {
+                non_terminal_leaf_found = true;
+                subgraph_mst.remove(edge);
+            }
+        }
+    }
+}
+
+/// Construct a minimum spanning tree of the nodes reachable from `start`. The edge weights are
+/// taken from the `weight` function and the neighbors of each node are found by using the
+/// `neighbors` function.
+/// This function requires that the nodes lie in the range `0..num_nodes`.
+fn prim_spanning_tree<W, N, I>(
+    num_nodes: usize,
+    weight: W,
+    neighbors: N,
+    start: NodeIndex,
+) -> EdgeTree
+where
+    W: Fn(NodeIndex, NodeIndex) -> NaturalOrInfinite,
+    N: Fn(NodeIndex) -> I,
+    I: Iterator<Item = NodeIndex>,
+{
+    // BinaryHeap is a max-heap; wrapping the items in `Reverse` effectively turns it into a min-
+    // heap.
+    let mut queue = BinaryHeap::new();
+    queue.push(Reverse(PriorityValuePair {
+        value: start,
+        priority: 0.into(),
+    }));
+    let mut processed = HashSet::new();
+    let mut parent: Vec<Option<NodeIndex>> = vec![None; num_nodes];
+    let mut key = vec![NaturalOrInfinite::infinity(); num_nodes];
+    while let Some(Reverse(PriorityValuePair { value: node, .. })) = queue.pop() {
+        if processed.contains(&node) {
+            continue;
+        }
+        processed.insert(node);
+        for neighbor in neighbors(node) {
+            if !processed.contains(&neighbor) {
+                let update = weight(node, neighbor);
+                if update < key[neighbor] {
+                    queue.push(Reverse(PriorityValuePair {
+                        value: neighbor,
+                        priority: update,
+                    }));
+                    key[neighbor] = update;
+                    parent[neighbor] = Some(node);
+                }
+            }
+        }
+    }
+    let mut tree = EdgeTree::empty();
+    for (node, parent_node) in parent.iter().enumerate() {
+        if let &Some(parent_node) = parent_node {
+            assert_ne!(node, parent_node);
+            let edge = edge(node, parent_node);
+            tree.insert(edge);
+        }
+    }
+    assert_eq!(tree.edges().len(), processed.len() - 1);
+    tree
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashSet;
 
     use super::*;
-    use crate::graph::tests::{small_test_graph, steiner_example_paper, steiner_example_wiki};
+    use crate::graph::tests::{diamond_test_graph, small_test_graph, steiner_example_paper, steiner_example_wiki, shortcut_test_graph};
     use crate::util::TestResult;
 
     fn assert_contains_terminals(tree: &EdgeTree, terminals: &[NodeIndex]) {
@@ -321,12 +450,40 @@ mod tests {
         );
     }
 
+    fn assert_leaves_are_terminals(tree: &EdgeTree, terminals: &[NodeIndex]) {
+        let leaves = find_leaves(tree);
+        for leaf in leaves {
+            assert!(terminals.contains(&leaf));
+        }
+    }
+
+    fn assert_tree(tree: &EdgeTree) {
+        assert_eq!(tree.edges().len(), tree.nodes().len() - 1);
+        let mut stack = vec![*tree.nodes().iter().next().unwrap()];
+        let mut found = HashSet::new();
+        while let Some(top) = stack.pop() {
+            for neighbor in tree.neighbors(top) {
+                if !found.contains(&neighbor) {
+                    stack.push(neighbor);
+                    found.insert(neighbor);
+                }
+            }
+        }
+        assert_eq!(found, tree.nodes());
+    }
+
+    fn assert_plausible_steiner_tree(tree: &EdgeTree, graph: &Graph) {
+        assert_contains_terminals(tree, graph.terminals());
+        assert_leaves_are_terminals(tree, graph.terminals());
+        assert_tree(tree);
+    }
+
     #[test]
     fn test_dreyfus_wagner_trivial() -> TestResult {
         let trivial = small_test_graph()?;
         let result = dreyfus_wagner(&trivial);
         assert_eq!(result.weight_in(&trivial), 3.into());
-        assert_contains_terminals(&result, trivial.terminals());
+        assert_plausible_steiner_tree(&result, &trivial);
         Ok(())
     }
 
@@ -338,10 +495,26 @@ mod tests {
             result.weight_in(&graph),
             NaturalOrInfinite::from(25 + 30 + 15 + 10 + 40 + 50 + 20)
         );
-        assert_contains_terminals(&result, graph.terminals());
+        assert_plausible_steiner_tree(&result, &graph);
         assert_eq!(
             result.edges(),
             &[(0, 4), (4, 8), (8, 10), (10, 11), (9, 10), (7, 9), (6, 7),]
+                .iter()
+                .copied()
+                .collect::<HashSet<_>>()
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn test_dreyfus_wagner_diamond() -> TestResult {
+        let graph = diamond_test_graph()?;
+        let tree = dreyfus_wagner(&graph);
+        assert_plausible_steiner_tree(&tree, &graph);
+        assert_eq!(tree.weight_in(&graph), 7.into());
+        assert_eq!(
+            tree.edges(),
+            &[(0, 1), (1, 3), (3, 4), (4, 5)]
                 .iter()
                 .copied()
                 .collect::<HashSet<_>>()
@@ -354,7 +527,7 @@ mod tests {
         let graph = steiner_example_paper()?;
         let tree = dreyfus_wagner(&graph);
         assert_eq!(tree.weight_in(&graph), 5.into());
-        assert_contains_terminals(&tree, graph.terminals());
+        assert_plausible_steiner_tree(&tree, &graph);
         Ok(())
     }
 
@@ -367,5 +540,96 @@ mod tests {
         let mut map = HashMap::new();
         map.insert(v1, "hi");
         assert_eq!(map[&v2], "hi");
+    }
+
+    fn prim_mst(graph: &Graph) -> EdgeTree {
+        prim_spanning_tree(
+            graph.num_nodes(),
+            |from, to| graph.weight(from, to),
+            |n| graph.neighbors(n).map(|&Edge { to, .. }| to),
+            0,
+        )
+    }
+
+    #[test]
+    fn test_prim() -> TestResult {
+        let graph = small_test_graph()?;
+        let tree = prim_mst(&graph);
+        assert_eq!(tree.weight_in(&graph), 3.into());
+        assert_eq!(
+            tree.edges(),
+            &[(0, 1), (1, 2),].iter().copied().collect::<HashSet<_>>()
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn test_prim_2() -> TestResult {
+        let graph = shortcut_test_graph()?;
+        let tree = prim_mst(&graph);
+        assert_eq!(tree.weight_in(&graph), 4.into());
+        assert_eq!(
+            tree.edges(),
+            &[(0, 1), (1, 2), (1, 3)].iter().copied().collect::<HashSet<_>>()
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn test_kou_approximation() -> TestResult {
+        let graphs = [
+            small_test_graph()?,
+            shortcut_test_graph()?,
+            steiner_example_paper()?,
+            steiner_example_wiki()?,
+        ];
+        for graph in &graphs {
+            let exact = dreyfus_wagner(graph);
+            let approx = kou_et_al_steiner_approximation(graph);
+            assert_plausible_steiner_tree(&exact, &graph);
+            assert_plausible_steiner_tree(&approx, &graph);
+            let leaves = find_leaves(&exact).len();
+            let exact_weight = exact.weight_in(graph).finite_value();
+            let approx_weight = approx.weight_in(graph).finite_value();
+            println!("exact_weight = {}, approx_weight = {}, leaves = {:?}", exact_weight, approx_weight, leaves);
+            assert!(
+                (approx_weight as f64) / (exact_weight as f64) <= (2.0 - (2.0/(leaves as f64)))
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn test_count_leaves() {
+        let mut tree = EdgeTree::empty();
+        assert!(find_leaves(&tree).is_empty());
+        tree.insert((0, 1));
+        assert_eq!(find_leaves(&tree), [0, 1].iter().copied().collect::<HashSet<_>>());
+        tree.insert((1, 2));
+        assert_eq!(find_leaves(&tree), [0, 2].iter().copied().collect::<HashSet<_>>());
+        tree.insert((1, 3));
+        assert_eq!(find_leaves(&tree), [0, 2, 3].iter().copied().collect::<HashSet<_>>());
+        tree.insert((2, 3));
+        assert_eq!(find_leaves(&tree), [0].iter().copied().collect::<HashSet<_>>());
+    }
+
+
+    fn find_leaves(tree: &EdgeTree) -> HashSet<NodeIndex> {
+        let mut encountered: HashMap<NodeIndex, (u32, (NodeIndex, NodeIndex))> = HashMap::new();
+        let mut num_leaves = 0;
+        for &(from, to) in tree.edges() {
+            let edge = (from, to);
+            for &n in &[from, to] {
+                encountered.entry(n).or_insert((0, edge)).0 += 1;
+            }
+        }
+        let mut leaves = HashSet::new();
+        for node in encountered.keys() {
+            let (count, edge) = encountered[node];
+            if count == 1 {
+                leaves.insert(*node);
+            }
+        }
+        leaves
     }
 }

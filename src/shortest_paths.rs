@@ -1,11 +1,13 @@
-use crate::graph::NodeIndex;
+use crate::graph::{Edge, NodeIndex};
 use crate::util::NaturalOrInfinite;
 use crate::Graph;
 use std::cmp::Ordering;
+use std::collections::BinaryHeap;
+use std::iter;
 use std::mem;
 use std::ops::{Index, IndexMut, Range};
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ShortestPath {
     distance: NaturalOrInfinite,
     path: Vec<NodeIndex>,
@@ -30,6 +32,17 @@ impl ShortestPath {
     pub fn path(&self) -> &[NodeIndex] {
         &self.path
     }
+
+    /// Edges are output in the form `(from, to)` where `from < to`.
+    pub fn edges_on_path(
+        &self,
+        start: NodeIndex,
+    ) -> impl Iterator<Item = (NodeIndex, NodeIndex)> + '_ {
+        iter::once(start)
+            .chain(self.path().iter().copied())
+            .zip(self.path().iter().copied())
+            .map(|(a, b)| (a.min(b), a.max(b)))
+    }
 }
 
 impl Default for ShortestPath {
@@ -43,7 +56,10 @@ impl Default for ShortestPath {
 
 impl Ord for ShortestPath {
     fn cmp(&self, other: &Self) -> Ordering {
-        self.distance().cmp(&other.distance())
+        // compare paths as well for consistency with PartialEq/Eq
+        self.distance()
+            .cmp(&other.distance())
+            .then_with(|| self.path.cmp(&other.path))
     }
 }
 
@@ -98,9 +114,42 @@ impl ShortestPathMatrix {
         }
     }
 
+    /// Returns a [ShortestPathMatrix] with the distances between all the terminal nodes of the
+    /// graph.
+    pub fn terminal_distances(graph: &Graph) -> Self {
+        let n = graph.num_terminals();
+        let mut result = Self {
+            paths: vec![ShortestPath::default(); n * n],
+            dimension: n,
+        };
+        // This could be done more efficiently as we don't actually need the shortest paths for
+        // all pairs.
+        let spm = Self::new(graph);
+        for from_idx in 0..graph.num_terminals() {
+            for to_idx in 0..graph.num_terminals() {
+                let from = graph.terminals()[from_idx];
+                let to = graph.terminals()[to_idx];
+                result[from_idx][to_idx] = spm[from][to].clone();
+            }
+        }
+        result
+    }
+
     fn index_range(&self, index: usize) -> Range<usize> {
         let start = index * self.dimension;
         start..start + self.dimension
+    }
+
+    pub fn dimension(&self) -> usize {
+        self.dimension
+    }
+
+    pub fn edges_on_path(
+        &self,
+        from: NodeIndex,
+        to: NodeIndex,
+    ) -> impl Iterator<Item = (NodeIndex, NodeIndex)> + '_ {
+        self[from][to].edges_on_path(from)
     }
 }
 
@@ -188,6 +237,36 @@ mod tests {
             ShortestPath::new(vec![3, 2, 1, 0], (30 + 50 + 30 + 15).into())
         );
         assert_paths_equiv(&spm);
+        Ok(())
+    }
+
+    #[test]
+    fn test_terminal_distances() -> TestResult {
+        let graph = small_test_graph()?;
+        let dist = ShortestPathMatrix::terminal_distances(&graph);
+        assert_eq!(dist[0][0], ShortestPath::empty());
+        assert_eq!(dist[1][1], ShortestPath::empty());
+        assert!(
+            dist[0][1] == ShortestPath::new(vec![2], 3.into())
+                || dist[0][1] == ShortestPath::new(vec![1, 2], 3.into())
+        );
+        assert!(
+            dist[1][0] == ShortestPath::new(vec![0], 3.into())
+                || dist[1][0] == ShortestPath::new(vec![1, 0], 3.into())
+        );
+        assert_eq!(dist.dimension(), 2);
+        Ok(())
+    }
+
+    #[test]
+    fn test_terminal_distances_2() -> TestResult {
+        let graph = shortcut_test_graph()?;
+        let dist = ShortestPathMatrix::terminal_distances(&graph);
+        assert_eq!(dist.dimension(), 2);
+        assert_eq!(dist[0][0], ShortestPath::empty());
+        assert_eq!(dist[1][1], ShortestPath::empty());
+        assert_eq!(dist[0][1], ShortestPath::new(vec![1, 2], 2.into()));
+        assert_eq!(dist[1][0], ShortestPath::new(vec![1, 0], 2.into()));
         Ok(())
     }
 }

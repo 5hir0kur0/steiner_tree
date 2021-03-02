@@ -9,8 +9,8 @@ pub type EdgeWeight = u32;
 
 #[derive(Eq, PartialEq, Clone, Debug)]
 pub struct Edge {
-    to: NodeIndex,
-    weight: EdgeWeight,
+    pub to: NodeIndex,
+    pub weight: EdgeWeight,
 }
 
 #[derive(Eq, PartialEq, Clone, Debug)]
@@ -40,6 +40,11 @@ impl Graph {
             .enumerate()
             .flat_map(|(from, e)| e.iter().map(move |&Edge { to, weight }| (from, to, weight)))
             .filter(|&(from, to, _)| from < to)
+    }
+
+    /// Returns an iterator over the edges to the neighbors of the given node.
+    pub fn neighbors(&self, idx: NodeIndex) -> impl Iterator<Item = &Edge> + '_ {
+        self.edges[idx].iter()
     }
 
     /// Iterator over the node indices.
@@ -410,6 +415,41 @@ pub(crate) mod tests {
     }
 
     /// ```text
+    ///        0
+    ///        | 3
+    ///        1
+    ///     1 / \ 1
+    ///      2   3
+    ///     1 \ / 1
+    ///        4
+    ///        | 2
+    ///        5
+    /// ```
+    /// Terminals: `0`, `3`, `5`
+    pub(crate) fn diamond_test_graph() -> ParseResult<Graph> {
+        "SECTION Graph\n\
+        Nodes 6\n\
+        Edges 6\n\
+        E 1 2 3\n\
+        E 2 3 1\n\
+        E 2 4 1\n\
+        E 3 5 1\n\
+        E 4 5 1\n\
+        E 5 6 2\n\
+        END\n\
+
+        SECTION Terminals\n\
+        Terminals 3\n\
+        T 1\n\
+        T 6\n\
+        T 4\n\
+        END\n\
+
+        EOF\n"
+            .parse::<Graph>()
+    }
+
+    /// ```text
     ///    1
     ///  0----1
     ///  |  / |
@@ -418,6 +458,7 @@ pub(crate) mod tests {
     ///  2----3
     ///    4
     /// ```
+    /// Terminals: `0`, `2`
     pub(crate) fn shortcut_test_graph() -> ParseResult<Graph> {
         "SECTION Graph\n\
         Nodes 4\n\
