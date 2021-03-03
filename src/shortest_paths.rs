@@ -25,6 +25,13 @@ impl ShortestPath {
         }
     }
 
+    pub fn unreachable() -> Self {
+        Self {
+            path: vec![],
+            distance: NaturalOrInfinite::infinity(),
+        }
+    }
+
     pub fn distance(&self) -> NaturalOrInfinite {
         self.distance
     }
@@ -47,10 +54,7 @@ impl ShortestPath {
 
 impl Default for ShortestPath {
     fn default() -> Self {
-        Self {
-            distance: NaturalOrInfinite::infinity(),
-            path: vec![],
-        }
+        Self::unreachable()
     }
 }
 
