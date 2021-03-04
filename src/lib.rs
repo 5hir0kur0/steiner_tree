@@ -8,4 +8,5 @@ mod util;
 pub use graph::Graph;
 pub use steiner_tree::algorithms::dreyfus_wagner;
 pub use steiner_tree::algorithms::kou_et_al_steiner_approximation;
+pub use steiner_tree::algorithms::takahashi_matsuyama_steiner_approximation;
 pub use steiner_tree::tree::EdgeTree;

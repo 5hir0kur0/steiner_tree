@@ -1,12 +1,12 @@
 use crate::graph::{Edge, NodeIndex};
-use crate::shortest_paths::{ShortestPathMatrix, ShortestPath};
+use crate::shortest_paths::{ShortestPath, ShortestPathMatrix};
 use crate::steiner_tree::tree::EdgeTree;
 use crate::util::{
     combinations, edge, non_trivial_subsets, sorted, NaturalOrInfinite, PriorityValuePair,
 };
 use crate::Graph;
 use std::cmp::{min, Reverse};
-use std::collections::{BinaryHeap, HashMap, HashSet};
+use std::collections::{BTreeSet, BinaryHeap, HashMap, HashSet};
 use std::iter;
 
 // The position in the outer vector encodes the non-leaf node.
@@ -14,6 +14,7 @@ type NonLeafWeights = Vec<HashMap<Vec<NodeIndex>, NaturalOrInfinite>>;
 type MinimumWeights = HashMap<Vec<NodeIndex>, NaturalOrInfinite>;
 
 /// Dreyfus-Wagner Algorithm for finding a minimal Steiner tree.
+/// (Dreyfus, S.E.; Wagner, R.A. (1971). "The Steiner problem in graphs")
 pub fn dreyfus_wagner(graph: &Graph) -> EdgeTree {
     let shortest_paths = ShortestPathMatrix::new(graph);
     if graph.num_terminals() <= 1 {
@@ -92,7 +93,8 @@ pub fn dreyfus_wagner(graph: &Graph) -> EdgeTree {
     tree
 }
 
-/// Add Steiner trees for all pairs of nodes. The Steiner trees just consist of the shortest paths between the nodes.
+/// Add Steiner trees for all pairs of nodes. The Steiner trees just consist of the shortest paths
+/// between the nodes.
 fn add_pair_steiner_trees(
     minimum_weights: &mut MinimumWeights,
     shortest_paths: &ShortestPathMatrix,
@@ -305,6 +307,8 @@ fn extend_index_difference(
     complement_and_el
 }
 
+/// Steiner tree approximation based on
+/// Kou, L.; Markowsky, G.; Berman, L. (1 June 1981). "A fast algorithm for Steiner trees"
 pub fn kou_et_al_steiner_approximation(graph: &Graph) -> EdgeTree {
     // Construct a complete graph from the steiner points (edge weights = distances in original graph).
     let complete_edges = ShortestPathMatrix::terminal_distances(graph);
@@ -315,7 +319,7 @@ pub fn kou_et_al_steiner_approximation(graph: &Graph) -> EdgeTree {
         |n| (0..complete_edges.dimension()).filter(move |&x| x != n),
         0,
     );
-    // Construct a subgaph of the original graph (represented here as a set of
+    // Construct a subgraph of the original graph (represented here as a set of
     // edges) that contains all nodes/edges on the original shortest paths between the nodes in
     // the MST above.
     let mut subgraph = HashSet::new();
@@ -365,12 +369,16 @@ pub fn kou_et_al_steiner_approximation(graph: &Graph) -> EdgeTree {
 
 /// Removes paths in the tree that lead to leaves which are not terminal nodes.
 /// After this function returns, all leaves of the tree are terminal nodes.
-fn remove_non_terminal_leaves(subgraph_mst: &mut EdgeTree, graph: &Graph) {
+
+// TODO: Because of the tree representation as a list of edges this operation is not very efficient.
+fn remove_non_terminal_leaves(tree: &mut EdgeTree, graph: &Graph) {
+    // This map records how often a certain node was encountered, together with the edge as part of
+    // which it was first encountered.
     let mut encountered: HashMap<NodeIndex, (u32, (NodeIndex, NodeIndex))> = HashMap::new();
     let mut non_terminal_leaf_found = true;
     while non_terminal_leaf_found {
         encountered.clear();
-        for &(from, to) in subgraph_mst.edges() {
+        for &(from, to) in tree.edges() {
             let edge = (from, to);
             for &n in &[from, to] {
                 encountered.entry(n).or_insert((0, edge)).0 += 1;
@@ -381,7 +389,7 @@ fn remove_non_terminal_leaves(subgraph_mst: &mut EdgeTree, graph: &Graph) {
             let (count, edge) = encountered[node];
             if count == 1 && !graph.terminals().contains(node) {
                 non_terminal_leaf_found = true;
-                subgraph_mst.remove(edge);
+                tree.remove(edge);
             }
         }
     }
@@ -414,6 +422,7 @@ where
     let mut key = vec![NaturalOrInfinite::infinity(); num_nodes];
     key[start] = 0.into();
     while let Some(Reverse(PriorityValuePair { value: node, .. })) = queue.pop() {
+        // This check is necessary because the same node might be pushed more than once; see below.
         if processed.contains(&node) {
             continue;
         }
@@ -445,21 +454,20 @@ where
     tree
 }
 
-
 /// Compute the shortest paths from the `start` node to all other nodes (in the same connected
 /// component). Node indices must lie in the range `0..num_nodes`.
 /// Path length is the sum of the edge weights as returned by `weight`. The graph is represented
 /// by the adjacency function `neighbors`.
-fn dijkstra_shortest_paths<W, N, I>(
+fn dijkstra_shortest_paths_general<W, N, I>(
     num_nodes: usize,
     weight: W,
     neighbors: N,
     start: NodeIndex,
 ) -> Vec<Option<ShortestPath>>
-    where
-        W: Fn(NodeIndex, NodeIndex) -> NaturalOrInfinite,
-        N: Fn(NodeIndex) -> I,
-        I: Iterator<Item = NodeIndex>,
+where
+    W: Fn(NodeIndex, NodeIndex) -> NaturalOrInfinite,
+    N: Fn(NodeIndex) -> I,
+    I: Iterator<Item = NodeIndex>,
 {
     // BinaryHeap is a max-heap; wrapping the items in `Reverse` effectively turns it into a min-
     // heap.
@@ -473,6 +481,7 @@ fn dijkstra_shortest_paths<W, N, I>(
     let mut key = vec![NaturalOrInfinite::infinity(); num_nodes];
     key[start] = 0.into();
     while let Some(Reverse(PriorityValuePair { value: node, .. })) = queue.pop() {
+        // This check is necessary because the same node might be pushed more than once; see below.
         if processed.contains(&node) {
             continue;
         }
@@ -496,7 +505,8 @@ fn dijkstra_shortest_paths<W, N, I>(
     for goal in 0..shortest_paths.len() {
         // trace path in reverse direction
         let path = trace_path(&parent, goal, start);
-        if path.is_empty() { // `goal` and `start` are not connected
+        if path.is_empty() {
+            // `goal` and `start` are not connected
             continue;
         }
         let mut reversed = path;
@@ -514,6 +524,7 @@ fn dijkstra_shortest_paths<W, N, I>(
 fn trace_path(parent: &Vec<Option<NodeIndex>>, start: NodeIndex, end: NodeIndex) -> Vec<NodeIndex> {
     let mut res = vec![start];
     let mut current = start;
+    // Just follow the "pointers" in the `parent` vector until the `end` is reached.
     while parent[current] != Some(end) {
         match parent[current] {
             Some(next) => {
@@ -527,6 +538,64 @@ fn trace_path(parent: &Vec<Option<NodeIndex>>, start: NodeIndex, end: NodeIndex)
     res
 }
 
+/// Run [dijkstra_shortest_paths_general] on a [Graph].
+fn dijkstra(graph: &Graph, start: NodeIndex) -> Vec<Option<ShortestPath>> {
+    dijkstra_shortest_paths_general(
+        graph.num_nodes(),
+        |from, to| graph.weight(from, to),
+        |n| graph.neighbors(n).map(|&Edge { to, .. }| to),
+        start,
+    )
+}
+
+/// Steiner tree approximation based on the method described in
+///   Takahashi, Hiromitsu; Matsuyama, Akira (1980).
+///   "An approximate solution for the Steiner problem in graphs"
+pub fn takahashi_matsuyama_steiner_approximation(graph: &Graph) -> EdgeTree {
+    // Mapping of the shortest paths from each terminal node to all nodes of the graph.
+    let mut terminal_to_all = vec![vec![]; graph.num_terminals()];
+    // TODO: Parallelize.
+    for (idx, &terminal) in graph.terminals().iter().enumerate() {
+        terminal_to_all[idx] = dijkstra(&graph, terminal);
+    }
+    // Stores the nodes that are already part of the tree.
+    let mut nodes_of_tree = HashSet::new();
+    let initial: NodeIndex = *graph.terminals().first().unwrap();
+    nodes_of_tree.insert(initial);
+    let mut tree = EdgeTree::empty();
+    // The set of terminal node indices which have not been processed yet.
+    let mut todo = HashMap::new();
+    for term_idx in 1..graph.num_terminals() {
+        let min = terminal_to_all[term_idx][initial]
+            .as_ref()
+            .expect("terminals not connected");
+        todo.insert(term_idx, (initial, min.distance()));
+    }
+    // TODO: Parallelize min search?
+    while let Some(&term_idx) = todo.keys().min_by_key(|k| todo[k].1) {
+        let (min, _dist) = todo[&term_idx];
+        let path = terminal_to_all[term_idx][min].as_ref().unwrap().clone();
+        todo.remove(&term_idx);
+        // TODO: Parallelize.
+        for edge in path.edges_on_path(graph.terminals()[term_idx]) {
+            tree.insert(edge);
+            let new: NodeIndex = edge.0;
+            if nodes_of_tree.contains(&new) {
+                continue;
+            }
+            nodes_of_tree.insert(new);
+            for (&cmp_term_idx, value) in todo.iter_mut() {
+                if let Some(dist) = &terminal_to_all[cmp_term_idx][new] {
+                    if dist.distance() < value.1 {
+                        *value = (new, dist.distance());
+                    }
+                }
+            }
+        }
+    }
+    tree
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashSet;
@@ -537,6 +606,7 @@ mod tests {
         steiner_example_wiki,
     };
     use crate::util::TestResult;
+    use std::ptr;
 
     fn assert_contains_terminals(tree: &EdgeTree, terminals: &[NodeIndex]) {
         let nodes = tree.nodes();
@@ -677,28 +747,37 @@ mod tests {
     }
 
     #[test]
-    fn test_kou_approximation() -> TestResult {
+    fn test_approximation_bounds() -> TestResult {
         let graphs = [
             small_test_graph()?,
             shortcut_test_graph()?,
             steiner_example_paper()?,
             steiner_example_wiki()?,
         ];
-        for graph in &graphs {
-            let exact = dreyfus_wagner(graph);
-            let approx = kou_et_al_steiner_approximation(graph);
-            assert_plausible_steiner_tree(&exact, &graph);
-            assert_plausible_steiner_tree(&approx, &graph);
-            let leaves = exact.find_leaves().len();
-            let exact_weight = exact.weight_in(graph).finite_value();
-            let approx_weight = approx.weight_in(graph).finite_value();
-            println!(
-                "exact_weight = {}, approx_weight = {}, leaves = {:?}",
-                exact_weight, approx_weight, leaves
-            );
-            assert!(
-                (approx_weight as f64) / (exact_weight as f64) <= (2.0 - (2.0 / (leaves as f64)))
-            );
+        let mut name = "kou et al";
+        for approx in &[
+            kou_et_al_steiner_approximation,
+            takahashi_matsuyama_steiner_approximation,
+        ] {
+            eprintln!("{} approximation tests:", name);
+            name = "takahashi & matsuyama";
+            for graph in &graphs {
+                let exact = dreyfus_wagner(graph);
+                let approx = kou_et_al_steiner_approximation(graph);
+                assert_plausible_steiner_tree(&exact, &graph);
+                assert_plausible_steiner_tree(&approx, &graph);
+                let leaves = exact.find_leaves().len();
+                let exact_weight = exact.weight_in(graph).finite_value();
+                let approx_weight = approx.weight_in(graph).finite_value();
+                eprintln!(
+                    "exact_weight = {}, approx_weight = {}, leaves = {:?}",
+                    exact_weight, approx_weight, leaves
+                );
+                assert!(
+                    (approx_weight as f64) / (exact_weight as f64)
+                        <= (2.0 - (2.0 / (leaves as f64)))
+                );
+            }
         }
         Ok(())
     }
@@ -733,13 +812,22 @@ mod tests {
     fn test_remove_non_terminal_leaves() -> TestResult {
         let graph = steiner_example_wiki()?;
         let mut tree = EdgeTree::empty();
-        [(0, 4), (4, 8), (8, 10), (10, 11), (9, 10), (7, 9), (6, 7),
-         // unnecessary edges:
-         (5, 7),
-         (0, 1),
-         (1, 2),
-         (2, 3),
-        ].iter().for_each(|&edge| tree.insert(edge));
+        [
+            (0, 4),
+            (4, 8),
+            (8, 10),
+            (10, 11),
+            (9, 10),
+            (7, 9),
+            (6, 7),
+            // unnecessary edges:
+            (5, 7),
+            (0, 1),
+            (1, 2),
+            (2, 3),
+        ]
+        .iter()
+        .for_each(|&edge| tree.insert(edge));
         remove_non_terminal_leaves(&mut tree, &graph);
         assert_eq!(
             tree.edges(),
@@ -751,25 +839,28 @@ mod tests {
         Ok(())
     }
 
-    fn dijkstra(graph: &Graph, start: NodeIndex) -> Vec<Option<ShortestPath>> {
-        dijkstra_shortest_paths(
-            graph.num_nodes(),
-            |from, to| graph.weight(from, to),
-            |n| graph.neighbors(n).map(|&Edge { to, .. }| to),
-            start,
-        )
-    }
-
     #[test]
     fn test_dijkstra() -> TestResult {
         let graph = shortcut_test_graph()?;
         let shortest_paths = dijkstra(&graph, 0);
-        assert_eq!(shortest_paths[3], Some(ShortestPath::new(vec![1, 3], 3.into())));
-        assert_eq!(shortest_paths[2], Some(ShortestPath::new(vec![1, 2], 2.into())));
-        assert_eq!(shortest_paths[1], Some(ShortestPath::new(vec![1], 1.into())));
+        assert_eq!(
+            shortest_paths[3],
+            Some(ShortestPath::new(vec![1, 3], 3.into()))
+        );
+        assert_eq!(
+            shortest_paths[2],
+            Some(ShortestPath::new(vec![1, 2], 2.into()))
+        );
+        assert_eq!(
+            shortest_paths[1],
+            Some(ShortestPath::new(vec![1], 1.into()))
+        );
         assert_eq!(shortest_paths[0], Some(ShortestPath::new(vec![], 0.into())));
         let shortest_paths = dijkstra(&graph, 2);
-        assert_eq!(shortest_paths[3], Some(ShortestPath::new(vec![1, 3], 3.into())));
+        assert_eq!(
+            shortest_paths[3],
+            Some(ShortestPath::new(vec![1, 3], 3.into()))
+        );
         Ok(())
     }
 }
