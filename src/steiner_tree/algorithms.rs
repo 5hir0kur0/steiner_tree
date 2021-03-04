@@ -1,5 +1,5 @@
 use crate::graph::{Edge, NodeIndex};
-use crate::shortest_paths::{ShortestPath, ShortestPathMatrix};
+use crate::shortest_paths::{ShortestPath, ShortestPathMatrix, dijkstra};
 use crate::steiner_tree::tree::EdgeTree;
 use crate::util::{
     combinations, edge, non_trivial_subsets, sorted, NaturalOrInfinite, PriorityValuePair,
@@ -454,100 +454,6 @@ where
     tree
 }
 
-/// Compute the shortest paths from the `start` node to all other nodes (in the same connected
-/// component). Node indices must lie in the range `0..num_nodes`.
-/// Path length is the sum of the edge weights as returned by `weight`. The graph is represented
-/// by the adjacency function `neighbors`.
-fn dijkstra_shortest_paths_general<W, N, I>(
-    num_nodes: usize,
-    weight: W,
-    neighbors: N,
-    start: NodeIndex,
-) -> Vec<Option<ShortestPath>>
-where
-    W: Fn(NodeIndex, NodeIndex) -> NaturalOrInfinite,
-    N: Fn(NodeIndex) -> I,
-    I: Iterator<Item = NodeIndex>,
-{
-    // BinaryHeap is a max-heap; wrapping the items in `Reverse` effectively turns it into a min-
-    // heap.
-    let mut queue = BinaryHeap::new();
-    queue.push(Reverse(PriorityValuePair {
-        value: start,
-        priority: 0.into(),
-    }));
-    let mut processed = HashSet::new();
-    let mut parent: Vec<Option<NodeIndex>> = vec![None; num_nodes];
-    let mut key = vec![NaturalOrInfinite::infinity(); num_nodes];
-    key[start] = 0.into();
-    while let Some(Reverse(PriorityValuePair { value: node, .. })) = queue.pop() {
-        // This check is necessary because the same node might be pushed more than once; see below.
-        if processed.contains(&node) {
-            continue;
-        }
-        processed.insert(node);
-        for neighbor in neighbors(node) {
-            if !processed.contains(&neighbor) {
-                let update = key[node] + weight(node, neighbor);
-                if update < key[neighbor] {
-                    // re-push instead since decrease-key is not supported
-                    queue.push(Reverse(PriorityValuePair {
-                        value: neighbor,
-                        priority: update,
-                    }));
-                    key[neighbor] = update;
-                    parent[neighbor] = Some(node);
-                }
-            }
-        }
-    }
-    let mut shortest_paths = vec![None; num_nodes];
-    for goal in 0..shortest_paths.len() {
-        // trace path in reverse direction
-        let path = trace_path(&parent, goal, start);
-        if path.is_empty() {
-            // `goal` and `start` are not connected
-            continue;
-        }
-        let mut reversed = path;
-        reversed.pop(); // remove `start`
-        reversed.reverse();
-        shortest_paths[goal] = Some(ShortestPath::new(reversed, key[goal].into()));
-    }
-    shortest_paths[start] = Some(ShortestPath::empty());
-    shortest_paths
-}
-
-/// Helper function for Dijkstra's algorithm to track back the shortest path using the `parent`
-/// array.
-/// Returns an empty vector if `end` is unreachable from `start`.
-fn trace_path(parent: &Vec<Option<NodeIndex>>, start: NodeIndex, end: NodeIndex) -> Vec<NodeIndex> {
-    let mut res = vec![start];
-    let mut current = start;
-    // Just follow the "pointers" in the `parent` vector until the `end` is reached.
-    while parent[current] != Some(end) {
-        match parent[current] {
-            Some(next) => {
-                res.push(next);
-                current = next;
-            }
-            None => return vec![],
-        }
-    }
-    res.push(end);
-    res
-}
-
-/// Run [dijkstra_shortest_paths_general] on a [Graph].
-fn dijkstra(graph: &Graph, start: NodeIndex) -> Vec<Option<ShortestPath>> {
-    dijkstra_shortest_paths_general(
-        graph.num_nodes(),
-        |from, to| graph.weight(from, to),
-        |n| graph.neighbors(n).map(|&Edge { to, .. }| to),
-        start,
-    )
-}
-
 /// Steiner tree approximation based on the method described in
 ///   Takahashi, Hiromitsu; Matsuyama, Akira (1980).
 ///   "An approximate solution for the Steiner problem in graphs"
@@ -835,31 +741,6 @@ mod tests {
                 .iter()
                 .copied()
                 .collect::<HashSet<_>>()
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn test_dijkstra() -> TestResult {
-        let graph = shortcut_test_graph()?;
-        let shortest_paths = dijkstra(&graph, 0);
-        assert_eq!(
-            shortest_paths[3],
-            Some(ShortestPath::new(vec![1, 3], 3.into()))
-        );
-        assert_eq!(
-            shortest_paths[2],
-            Some(ShortestPath::new(vec![1, 2], 2.into()))
-        );
-        assert_eq!(
-            shortest_paths[1],
-            Some(ShortestPath::new(vec![1], 1.into()))
-        );
-        assert_eq!(shortest_paths[0], Some(ShortestPath::new(vec![], 0.into())));
-        let shortest_paths = dijkstra(&graph, 2);
-        assert_eq!(
-            shortest_paths[3],
-            Some(ShortestPath::new(vec![1, 3], 3.into()))
         );
         Ok(())
     }
