@@ -368,30 +368,42 @@ pub fn kou_et_al_steiner_approximation(graph: &Graph) -> EdgeTree {
 
 /// Removes paths in the tree that lead to leaves which are not terminal nodes.
 /// After this function returns, all leaves of the tree are terminal nodes.
-
-// TODO: Because of the tree representation as a list of edges this operation is not very efficient.
-fn remove_non_terminal_leaves(tree: &mut EdgeTree, graph: &Graph) {
-    // This map records how often a certain node was encountered, together with the edge as part of
-    // which it was first encountered.
-    let mut encountered: HashMap<NodeIndex, (u32, (NodeIndex, NodeIndex))> = HashMap::new();
-    let mut non_terminal_leaf_found = true;
-    while non_terminal_leaf_found {
-        encountered.clear();
-        for &(from, to) in tree.edges() {
-            let edge = (from, to);
-            for &n in &[from, to] {
-                encountered.entry(n).or_insert((0, edge)).0 += 1;
-            }
+fn remove_non_terminal_leaves(tree: &EdgeTree, graph: &Graph) -> EdgeTree {
+    // convert the tree from an edge representation to an adjacency list (set) representation
+    let mut adjacency: HashMap<NodeIndex, HashSet<NodeIndex>> = HashMap::new();
+    for edge in tree.edges() {
+        adjacency.entry(edge.0).or_insert_with(HashSet::new).insert(edge.1);
+        adjacency.entry(edge.1).or_insert_with(HashSet::new).insert(edge.0);
+    }
+    let mut non_terminal_leaves = vec![];
+    for (node, neighbors) in adjacency.iter() {
+        if neighbors.len() == 1 && graph.terminals().binary_search(node).is_err() {
+            // non-terminal leaf
+            non_terminal_leaves.push(*node);
         }
-        non_terminal_leaf_found = false;
-        for node in encountered.keys() {
-            let (count, edge) = encountered[node];
-            if count == 1 && !graph.terminals().contains(node) {
-                non_terminal_leaf_found = true;
-                tree.remove(edge);
+    }
+    while let Some(mut leaf) = non_terminal_leaves.pop() {
+        if !adjacency.contains_key(&leaf) {
+            continue;
+        }
+        // keep cutting off the branch until we hit a non-leaf or a terminal leaf
+        while adjacency[&leaf].len() == 1 && graph.terminals().binary_search(&leaf).is_err() {
+            let neighbor = *adjacency[&leaf].iter().next().unwrap();
+            adjacency.remove(&leaf);
+            adjacency.get_mut(&neighbor).unwrap().remove(&leaf);
+            leaf = neighbor;
+        }
+    }
+    // convert the data to an edge-tree again
+    let mut result = EdgeTree::empty();
+    for (&from, neighbors) in adjacency.iter() {
+        for &to in neighbors {
+            if from < to {
+                result.insert(edge(from, to));
             }
         }
     }
+    result
 }
 
 /// Construct a minimum spanning tree of the nodes reachable from `start`. The edge weights are
@@ -733,7 +745,7 @@ mod tests {
         ]
         .iter()
         .for_each(|&edge| tree.insert(edge));
-        remove_non_terminal_leaves(&mut tree, &graph);
+        tree = remove_non_terminal_leaves(&tree, &graph);
         assert_eq!(
             tree.edges(),
             &[(0, 4), (4, 8), (8, 10), (10, 11), (9, 10), (7, 9), (6, 7),]
