@@ -3,8 +3,10 @@ use crate::shortest_paths::ShortestPath;
 use crate::util::NaturalOrInfinite;
 use crate::Graph;
 use std::collections::{HashMap, HashSet};
-use std::iter;
 
+/// A tree represented by the set of its edges.
+/// This struct should only be used to represent actual trees.
+/// Its methods do **not** check this so you can have non-tree [EdgeTree]s during construction.
 #[derive(Debug)]
 pub struct EdgeTree {
     // edges are always ordered
@@ -12,37 +14,46 @@ pub struct EdgeTree {
 }
 
 impl EdgeTree {
+    /// Create a new [EdgeTree] from a path. Since [ShortestPath] does not store the start node,
+    /// it has to be specified as a separate parameter.
     pub fn new(path: &ShortestPath, start: NodeIndex) -> Self {
         let edges = path.edges_on_path(start).collect::<HashSet<_>>();
         Self { edges }
     }
 
+    /// Create an empty [EdgeTree].
     pub fn empty() -> Self {
         Self {
             edges: HashSet::new(),
         }
     }
 
+    /// Return true if the tree is empty.
     pub fn is_empty(&self) -> bool {
         self.edges.is_empty()
     }
 
+    /// Add all edges of the `other` tree to this one.
     pub fn extend(&mut self, other: &Self) {
         self.edges.extend(other.edges.iter());
     }
 
+    /// Add an edge to the tree.
     /// Requires that `a < b` where `edge = (a, b)`.
     pub fn insert(&mut self, edge: (NodeIndex, NodeIndex)) {
         assert!(edge.0 < edge.1);
         self.edges.insert(edge);
     }
 
+    /// Remove an edge from the tree.
     /// Requires that `a < b` where `edge = (a, b)`.
     pub fn remove(&mut self, edge: (NodeIndex, NodeIndex)) {
         assert!(edge.0 < edge.1);
         self.edges.remove(&edge);
     }
 
+    /// Calculate how much the tree weighs. `graph` should usually be the [Graph] from which the
+    /// tree was constructed.
     pub fn weight_in(&self, graph: &Graph) -> NaturalOrInfinite {
         let mut weight = NaturalOrInfinite::from(0);
         for w in self.edges.iter().map(|&(a, b)| graph.weight(a, b)) {
@@ -55,7 +66,7 @@ impl EdgeTree {
     pub(crate) fn nodes(&self) -> HashSet<NodeIndex> {
         self.edges
             .iter()
-            .flat_map(|&(a, b)| iter::once(a).chain(iter::once(b)))
+            .flat_map(|&(a, b)| std::iter::once(a).chain(std::iter::once(b)))
             .collect::<HashSet<_>>()
     }
 

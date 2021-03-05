@@ -4,15 +4,19 @@ use std::num::ParseIntError;
 use std::{error::Error, str::FromStr};
 
 pub type NodeIndex = usize;
-pub type TerminalIndex = usize;
 pub type EdgeWeight = u32;
 
+/// Used to represent a weighted edge. The tail of the edge is implicitly represented by the index
+/// at which it is stored. Therefore it only stores the head (`to`).
 #[derive(Eq, PartialEq, Clone, Debug)]
 pub struct Edge {
     pub to: NodeIndex,
     pub weight: EdgeWeight,
 }
 
+/// Undirected graph stored as an adjacency vector.
+/// Used to represent the graphs from the PACE 2018 challenge (track 1).
+/// Also stores the terminals of the Steiner problem.
 #[derive(Eq, PartialEq, Clone, Debug)]
 pub struct Graph {
     edges: Vec<Vec<Edge>>,
@@ -28,6 +32,7 @@ impl FromStr for Graph {
 }
 
 impl Graph {
+    /// Return the number of nodes.
     pub fn num_nodes(&self) -> usize {
         self.edges.len() // since `edges` is an adjacency vector this is the number of *nodes*
     }
@@ -42,32 +47,27 @@ impl Graph {
             .filter(|&(from, to, _)| from < to)
     }
 
-    /// Returns an iterator over the edges to the neighbors of the given node.
+    /// Return an iterator over the edges to the neighbors of the given node.
     pub fn neighbors(&self, idx: NodeIndex) -> impl Iterator<Item = &Edge> + '_ {
         self.edges[idx].iter()
     }
 
-    /// Iterator over the node indices.
+    /// Return an iterator over the node indices.
     pub fn node_indices(&self) -> impl Iterator<Item = NodeIndex> {
         0..self.num_nodes()
     }
 
+    /// Return the terminals of the Steiner problem this graph represents.
     pub fn terminals(&self) -> &[NodeIndex] {
         &self.terminals
     }
 
-    pub fn terminal(&self, index: TerminalIndex) -> NodeIndex {
-        self.terminals[index]
-    }
-
+    /// Return the number of terminals.
     pub fn num_terminals(&self) -> usize {
         self.terminals.len()
     }
 
-    pub fn terminal_indices(&self) -> impl Iterator<Item = TerminalIndex> {
-        0..self.num_terminals()
-    }
-
+    /// Return the weigh of the edge between `from` and `to`.
     // TODO: efficient implementation
     pub fn weight(&self, from: NodeIndex, to: NodeIndex) -> NaturalOrInfinite {
         self.edges[from]
@@ -79,6 +79,7 @@ impl Graph {
     }
 }
 
+/// Represents an error that occurs during the parsing of a [Graph].
 #[derive(Debug, PartialEq, Eq)]
 pub struct ParseError {
     line: usize,
@@ -87,6 +88,12 @@ pub struct ParseError {
 }
 
 impl ParseError {
+    /// Construct a [ParseError].
+    ///
+    /// Parameters:
+    /// - `line`: line where the error occurred
+    /// - `column`: column where the error occurred
+    /// - `message`: error message
     pub fn new(line: usize, column: usize, message: String) -> Self {
         ParseError {
             line,
@@ -104,8 +111,9 @@ impl Display for ParseError {
 
 impl Error for ParseError {}
 
+/// Result of parsing a type `T`. Either an instance of `T` or an error.
 pub type ParseResult<T> = Result<T, ParseError>;
-/// Rest of input, line, column.
+/// Current state of the parsing: rest (unprocessed part) of input string, line, column.
 type ParseState<'a> = (&'a str, usize, usize);
 
 /// Wraps a "raw", parsed [NodeIndex], i.e. a number between `1` and `#nodes`.
@@ -256,34 +264,31 @@ fn parse_edge(
     let (weight, state) = parse_inline(state)?;
     let state = skip_whitespace(state);
     expect(state, "\n")?;
-    let state = next_line(state)?;
+    let state = skip_empty_lines(state)?;
     Ok(((from, to, weight), state))
 }
 
-fn skip_empty_lines(state: &mut ParseState) {
-    while line_is_empty(*state) {
-        let next = next_line(*state);
-        if let Ok(next) = next {
-            *state = next;
-        } else {
-            return;
-        }
+fn skip_empty_lines(mut state: ParseState) -> ParseResult<ParseState> {
+    while line_is_empty(state) {
+        state = next_line(state)?;
     }
+    Ok(state)
 }
 
 /// Parse graph, reporting parse errors.
 /// Since we're dealing with an NP-hard problem and thus the graphs are not going to be "huge"
 /// it's acceptable to just expect the whole graph file to be read into memory.
 pub fn parse_graph(text: &str) -> ParseResult<Graph> {
-    let mut state = (text, 0, 0);
-    skip_empty_lines(&mut state);
+    let mut state = skip_empty_lines((text, 0, 0))?;
     state = symbol(state, "SECTION")?;
     state = symbol(state, "Graph")?;
-    state = next_line(state)?;
+    state = skip_empty_lines(state)?;
     let num_nodes: usize = parse_key_value(state, "Nodes")?;
     state = next_line(state)?;
+    state = skip_empty_lines(state)?;
     let num_edges: usize = parse_key_value(state, "Edges")?;
     state = next_line(state)?;
+    state = skip_empty_lines(state)?;
     let mut edges = vec![vec![]; num_nodes];
     for _ in 0..num_edges {
         let ((from, to, weight), new_state) = parse_edge(state)?;
@@ -296,12 +301,13 @@ pub fn parse_graph(text: &str) -> ParseResult<Graph> {
         }
     }
     state = symbol(state, "END")?;
-    skip_empty_lines(&mut state);
+    state = skip_empty_lines(state)?;
     state = symbol(state, "SECTION")?;
     state = symbol(state, "Terminals")?;
-    state = next_line(state)?;
+    state = skip_empty_lines(state)?;
     let num_terminals: usize = parse_key_value(state, "Terminals")?;
     state = next_line(state)?;
+    state = skip_empty_lines(state)?;
     let mut terminals = vec![];
     for _ in 0..num_terminals {
         let terminal: ParsedNodeIndex = parse_key_value(state, "T")?;
@@ -317,9 +323,10 @@ pub fn parse_graph(text: &str) -> ParseResult<Graph> {
             terminals.push(terminal);
         }
         state = next_line(state)?;
+        state = skip_empty_lines(state)?;
     }
     state = symbol(state, "END")?;
-    skip_empty_lines(&mut state);
+    state = skip_empty_lines(state)?;
     symbol(state, "EOF")?;
     terminals.sort_unstable();
     for vec in &mut edges {

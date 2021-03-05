@@ -1,13 +1,12 @@
 use crate::graph::{Edge, NodeIndex};
-use crate::shortest_paths::{ShortestPath, ShortestPathMatrix, dijkstra};
+use crate::shortest_paths::{dijkstra, ShortestPathMatrix};
 use crate::steiner_tree::tree::EdgeTree;
 use crate::util::{
-    combinations, edge, non_trivial_subsets, sorted, NaturalOrInfinite, PriorityValuePair,
+    combinations, edge, non_trivial_subsets, is_sorted, NaturalOrInfinite, PriorityValuePair,
 };
 use crate::Graph;
 use std::cmp::{min, Reverse};
-use std::collections::{BTreeSet, BinaryHeap, HashMap, HashSet};
-use std::iter;
+use std::collections::{BinaryHeap, HashMap, HashSet};
 
 // The position in the outer vector encodes the non-leaf node.
 type NonLeafWeights = Vec<HashMap<Vec<NodeIndex>, NaturalOrInfinite>>;
@@ -103,7 +102,7 @@ fn add_pair_steiner_trees(
     let nodes = graph.node_indices().collect::<Vec<_>>();
     for pair in combinations(&nodes, 2) {
         let distance = shortest_paths[pair[0]][pair[1]].distance();
-        debug_assert!(sorted(&pair));
+        debug_assert!(is_sorted(&pair));
         minimum_weights.insert(pair, distance);
     }
 }
@@ -240,7 +239,7 @@ fn calculate_non_leaf_steiner_trees(
 ) {
     for subset in combinations(terminals, subset_size) {
         for v in nodes_not_in_subset(graph, &subset) {
-            debug_assert!(sorted(&subset));
+            debug_assert!(is_sorted(&subset));
             non_leaf[v].insert(
                 subset.clone(),
                 non_trivial_subsets(&subset)
@@ -275,7 +274,7 @@ fn nodes_not_in_subset<'a, 'b>(
 where
     'a: 'b,
 {
-    debug_assert!(sorted(&subset));
+    debug_assert!(is_sorted(&subset));
     graph
         .node_indices()
         .filter(move |v| subset.binary_search(v).is_err())
@@ -299,7 +298,7 @@ fn extend_index_difference(
     element: NodeIndex,
 ) -> Vec<NodeIndex> {
     let mut complement_and_el = set.to_vec();
-    debug_assert!(sorted(other));
+    debug_assert!(is_sorted(other));
     debug_assert!(!set.contains(&element));
     complement_and_el.retain(|e| other.binary_search(e).is_err());
     complement_and_el.push(element);
@@ -512,7 +511,6 @@ mod tests {
         steiner_example_wiki,
     };
     use crate::util::TestResult;
-    use std::ptr;
 
     fn assert_contains_terminals(tree: &EdgeTree, terminals: &[NodeIndex]) {
         let nodes = tree.nodes();
@@ -669,7 +667,7 @@ mod tests {
             name = "takahashi & matsuyama";
             for graph in &graphs {
                 let exact = dreyfus_wagner(graph);
-                let approx = kou_et_al_steiner_approximation(graph);
+                let approx = approx(graph);
                 assert_plausible_steiner_tree(&exact, &graph);
                 assert_plausible_steiner_tree(&approx, &graph);
                 let leaves = exact.find_leaves().len();

@@ -7,6 +7,8 @@ use std::iter;
 use std::mem;
 use std::ops::{Index, IndexMut, Range};
 
+/// Stores a path together with its distance. Used to represent shortest paths computed by
+/// [dijkstra_shortest_paths_general] or [ShortestPathMatrix::floyd_warshall].
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ShortestPath {
     distance: NaturalOrInfinite,
@@ -14,10 +16,14 @@ pub struct ShortestPath {
 }
 
 impl ShortestPath {
+    /// Create a new [ShortestPath] given the `path` and the `distance`.
+    /// The `path` should not contain the start node which is instead implicitly represented by the
+    /// index where the [ShortestPath] is stored.
     pub fn new(path: Vec<NodeIndex>, distance: NaturalOrInfinite) -> Self {
         Self { path, distance }
     }
 
+    /// Create an empty [ShortestPath] with a distance of `0`.
     pub fn empty() -> Self {
         Self {
             path: vec![],
@@ -25,6 +31,7 @@ impl ShortestPath {
         }
     }
 
+    /// Create an empty [ShortestPath] with a distance of `NaturalOrInfinite::infinity()`.
     pub fn unreachable() -> Self {
         Self {
             path: vec![],
@@ -32,14 +39,17 @@ impl ShortestPath {
         }
     }
 
+    /// Get the distance of the path.
     pub fn distance(&self) -> NaturalOrInfinite {
         self.distance
     }
 
+    /// Get the nodes of the path. Note that this does not contain the start node.
     pub fn path(&self) -> &[NodeIndex] {
         &self.path
     }
 
+    /// Get the edges of the path when it starts at `start`.
     /// Edges are output in the form `(from, to)` where `from < to`.
     pub fn edges_on_path(
         &self,
@@ -58,6 +68,7 @@ impl Default for ShortestPath {
     }
 }
 
+// ShortestPaths are ordered by their distances.
 impl Ord for ShortestPath {
     fn cmp(&self, other: &Self) -> Ordering {
         // compare paths as well for consistency with PartialEq/Eq
@@ -73,12 +84,14 @@ impl PartialOrd for ShortestPath {
     }
 }
 
+/// Used to store all shortest path between a subset (or all) of the nodes of a graph.
 pub struct ShortestPathMatrix {
     paths: Vec<ShortestPath>,
     dimension: usize,
 }
 
 impl ShortestPathMatrix {
+    /// Compute the shortest paths between all pairs of nodes in the graph.
     pub fn new(graph: &Graph) -> Self {
         let n = graph.num_nodes();
         let paths = vec![ShortestPath::default(); n * n];
@@ -133,31 +146,27 @@ impl ShortestPathMatrix {
         for from_idx in 0..graph.num_terminals() {
             for to_idx in 0..graph.num_terminals() {
                 let to = graph.terminals()[to_idx];
-                result[from_idx][to_idx] = terminal_to_all[from_idx][to].take().expect("terminals not connected");
+                result[from_idx][to_idx] = terminal_to_all[from_idx][to]
+                    .take()
+                    .expect("terminals not connected");
             }
         }
         result
     }
 
+    /// The range of values where the index of the first dimension is `index`.
     fn index_range(&self, index: usize) -> Range<usize> {
         let start = index * self.dimension;
         start..start + self.dimension
     }
 
+    /// The size of the matrix `m` in memory is `m.dimension() * m.dimension()`.
     pub fn dimension(&self) -> usize {
         self.dimension
     }
-
-    pub fn edges_on_path(
-        &self,
-        from: NodeIndex,
-        to: NodeIndex,
-    ) -> impl Iterator<Item = (NodeIndex, NodeIndex)> + '_ {
-        self[from][to].edges_on_path(from)
-    }
 }
 
-/// This allows for neat two-dimensional indexing (e.g. `spa[a][b]`).
+/// This allows for neat two-dimensional indexing (e.g. `spm[a][b]`).
 impl Index<usize> for ShortestPathMatrix {
     type Output = [ShortestPath];
 
@@ -166,7 +175,7 @@ impl Index<usize> for ShortestPathMatrix {
     }
 }
 
-/// This allows for neat two-dimensional indexing (e.g. `spa[a][b] = c`).
+/// This allows for neat two-dimensional indexing (e.g. `spm[a][b] = c`).
 impl IndexMut<usize> for ShortestPathMatrix {
     fn index_mut(&mut self, index: usize) -> &mut Self::Output {
         let range = self.index_range(index);
@@ -184,10 +193,10 @@ pub fn dijkstra_shortest_paths_general<W, N, I>(
     neighbors: N,
     start: NodeIndex,
 ) -> Vec<Option<ShortestPath>>
-    where
-        W: Fn(NodeIndex, NodeIndex) -> NaturalOrInfinite,
-        N: Fn(NodeIndex) -> I,
-        I: Iterator<Item = NodeIndex>,
+where
+    W: Fn(NodeIndex, NodeIndex) -> NaturalOrInfinite,
+    N: Fn(NodeIndex) -> I,
+    I: Iterator<Item = NodeIndex>,
 {
     // BinaryHeap is a max-heap; wrapping the items in `Reverse` effectively turns it into a min-
     // heap.
@@ -333,6 +342,10 @@ mod tests {
         assert_eq!(
             spm[6][0],
             ShortestPath::new(vec![3, 2, 1, 0], (30 + 50 + 30 + 15).into())
+        );
+        assert_eq!(
+            spm[1][6],
+            ShortestPath::new(vec![2, 3, 6], (30 + 50 + 30).into())
         );
         assert_paths_equiv(&spm);
         Ok(())

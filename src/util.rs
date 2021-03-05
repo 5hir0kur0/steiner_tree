@@ -2,7 +2,6 @@ use crate::graph::NodeIndex;
 use std::cmp::Ordering;
 use std::error::Error;
 use std::fmt::Debug;
-use std::iter;
 use std::ops::{Add, Index, IndexMut};
 
 /// Result with boxed error as trait object.
@@ -39,6 +38,7 @@ impl Ord for NaturalOrInfinite {
 impl Add for NaturalOrInfinite {
     type Output = NaturalOrInfinite;
 
+    /// Adding something to `infinity` will result in `infinity`.
     fn add(self, rhs: Self) -> Self::Output {
         if self.0 < 0 || rhs.0 < 0 {
             NaturalOrInfinite(-1)
@@ -49,6 +49,8 @@ impl Add for NaturalOrInfinite {
 }
 
 impl NaturalOrInfinite {
+    /// The value `infinity()` is bigger than all other values of [NaturalOrInfinite] except
+    /// `infinity()` itself.
     pub fn infinity() -> Self {
         NaturalOrInfinite(-1)
     }
@@ -77,6 +79,7 @@ impl NaturalOrInfinite {
     }
 }
 
+/// Iterator over the combinations of the elements of a given set that have a specified length.
 pub struct Combinations<'a, T: Copy> {
     indices: Vec<usize>,
     elements: &'a [T],
@@ -134,6 +137,8 @@ impl<'a, T: Copy> Combinations<'a, T> {
         true
     }
 
+    /// Return a pointer to the combination that will be returned and go the next combination.
+    /// This can be used to iterate over the combinations without needing an allocation each time.
     // This can't be the "real" iterator implementation because the iterator protocol is too
     // restrictive to allow returning references to the iterator itself so I would have to allocate
     // each time which the caller might not want to.
@@ -178,6 +183,8 @@ impl<'a, T: Copy> NonTrivialSubsets<'a, T> {
     }
 }
 
+/// Return an iterator over all nontrivial (i.e. not the empty set and not the full set) subsets.
+/// The sets are ordered by their length.
 pub fn non_trivial_subsets<T: Copy>(elements: &[T]) -> NonTrivialSubsets<T> {
     NonTrivialSubsets::new(elements)
 }
@@ -261,109 +268,8 @@ impl<T: Default + Clone> IndexMut<&[usize]> for Vector<T> {
     }
 }
 
-/// A map that maps subsets of a certain size of a set of indices (i.e. `usize`s from 0..n).
-/// E.g. with a subset size of `2` and the set of indices `{0, 1, 2, 3}` you could do something like
-/// this `indexSetMap[&mut [1, 2]] = indexSetMap[&mut [0, 1]]`.
-/// Note that indexing mutates the index. The reason that the index is not moved is so that the
-/// caller can reuse the allocation. Indexing by `Vec`s instead of slices is also supported; in that
-/// case the index value is moved.
-pub struct IndexSetMap<T: Copy + Default> {
-    map: Vector<T>,
-    subset_size: usize,
-}
-
-impl<T: Copy + Default> IndexSetMap<T> {
-    pub fn new(num_elements: usize, subset_size: usize) -> Self {
-        // Since we're talking about sets the dimensions get smaller towards the end.
-        // Indices are always going to be ordered, so a two-dimensional IndexSetMap over the
-        // indices {0, 1, 2, 3, 4} can never have 0 as its second index.
-        // But there also has to be enough elements "left" afterwards so it could also not have
-        // 4 as the first index because then there wouldn't be a bigger element for the second
-        // dimension.
-        // Therefore every dimension can at most have `#elements - (subset_size - 1)`
-        let dimensions = iter::repeat(num_elements - (subset_size - 1))
-            .take(subset_size)
-            .collect();
-        Self {
-            map: Vector::new(dimensions),
-            subset_size,
-        }
-    }
-
-    pub fn subset_size(&self) -> usize {
-        self.subset_size
-    }
-
-    fn calculate_index(index: &mut [usize]) {
-        #[cfg(debug_assertions)]
-        {
-            let mut index2 = index.to_vec();
-            index2.dedup();
-            debug_assert!(index2.len() == index.len())
-        }
-        index.sort_unstable();
-        index.iter_mut().enumerate().for_each(|(ii, i)| *i -= ii);
-    }
-}
-
-impl<T: Copy + Default> Index<Vec<usize>> for IndexSetMap<T> {
-    type Output = T;
-
-    fn index(&self, mut index: Vec<usize>) -> &Self::Output {
-        Self::calculate_index(&mut index);
-        &self.map[&index]
-    }
-}
-
-impl<T: Copy + Default> IndexMut<Vec<usize>> for IndexSetMap<T> {
-    fn index_mut(&mut self, mut index: Vec<usize>) -> &mut Self::Output {
-        Self::calculate_index(&mut index);
-        &mut self.map[&index]
-    }
-}
-
-/// List of [IndexSetMaps] that can be accessed with an offset.
-/// Subsets below the offset could e.g. be those that are considered "trivial" and thus need not
-/// be considered. Cf. the usage in [crate::steiner_tree::dreyfus_wagner].
-pub(crate) struct IndexSetMaps<T: Copy + Default> {
-    maps: Vec<IndexSetMap<T>>,
-    offset: usize,
-}
-
-impl<T: Copy + Default> IndexSetMaps<T> {
-    pub fn new(offset: usize) -> Self {
-        Self {
-            maps: vec![],
-            offset,
-        }
-    }
-
-    pub fn push(&mut self, map: IndexSetMap<T>) {
-        assert_eq!(self.maps.len() + self.offset, map.subset_size());
-        self.maps.push(map);
-    }
-
-    #[cfg(test)]
-    pub fn len(&self) -> usize {
-        self.maps.len()
-    }
-}
-
-impl<T: Copy + Default> Index<Vec<usize>> for IndexSetMaps<T> {
-    type Output = T;
-
-    fn index(&self, index: Vec<usize>) -> &Self::Output {
-        &self.maps[index.len() - self.offset][index]
-    }
-}
-
-impl<T: Copy + Default> IndexMut<Vec<usize>> for IndexSetMaps<T> {
-    fn index_mut(&mut self, index: Vec<usize>) -> &mut Self::Output {
-        &mut self.maps[index.len() - self.offset][index]
-    }
-}
-
-pub(crate) fn sorted<T: Ord>(elements: &[T]) -> bool {
+/// Check if the slice is sorted in non-decreasing order..
+pub(crate) fn is_sorted<T: Ord>(elements: &[T]) -> bool {
     for (a, b) in elements.iter().zip(elements.iter().skip(1)) {
         if a > b {
             return false;
@@ -372,6 +278,9 @@ pub(crate) fn sorted<T: Ord>(elements: &[T]) -> bool {
     true
 }
 
+/// Stores a `value` together with a `priority`. Can be used for priority queues such as
+/// [std::collections::BinaryHeap].
+/// The values will be ordered by the `priority`.
 #[derive(Debug, PartialEq, Eq)]
 pub struct PriorityValuePair<P: Ord, V: Ord> {
     pub value: V,
@@ -393,7 +302,7 @@ impl<P: Ord, V: Ord> PartialOrd for PriorityValuePair<P, V> {
     }
 }
 
-/// Returns an edge `(a, b)` such that `a < b`.
+/// Returns a tuple `(a, b)` such that `a < b`.
 pub fn edge(from: NodeIndex, to: NodeIndex) -> (NodeIndex, NodeIndex) {
     assert_ne!(from, to);
     (from.min(to), from.max(to))
@@ -402,8 +311,6 @@ pub fn edge(from: NodeIndex, to: NodeIndex) -> (NodeIndex, NodeIndex) {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::graph::tests::steiner_example_wiki;
-    use crate::shortest_paths::ShortestPathMatrix;
 
     #[test]
     fn test_natural_or_infinite() {
@@ -482,7 +389,7 @@ pub(crate) mod tests {
         let lots: Vec<u32> = (1..=1000).collect();
         for n in 1..1000 {
             for (_, comb) in (0..3).zip(combinations(&lots, n)) {
-                assert!(sorted(&comb))
+                assert!(is_sorted(&comb))
             }
         }
     }
@@ -525,115 +432,5 @@ pub(crate) mod tests {
         for i in 0..10 {
             assert_eq!(vec[&[i]], i);
         }
-    }
-
-    #[test]
-    #[should_panic]
-    fn test_index_set_map_wrong_length_1() {
-        let map = IndexSetMap::new(2, 1);
-        map[vec![0, 1]]
-    }
-
-    #[test]
-    #[should_panic]
-    fn test_index_set_map_wrong_length_2() {
-        let map = IndexSetMap::new(100, 3);
-        map[vec![0, 1, 2, 3]]
-    }
-
-    #[test]
-    #[should_panic]
-    fn test_index_set_map_out_of_bounds_1() {
-        let map = IndexSetMap::new(0, 1);
-        map[vec![0]]
-    }
-
-    #[test]
-    #[should_panic]
-    fn test_index_set_map_out_of_bounds_2() {
-        let map = IndexSetMap::new(1, 1);
-        map[vec![1]]
-    }
-
-    #[test]
-    #[should_panic]
-    fn test_index_set_map_out_of_bounds_3() {
-        let map = IndexSetMap::new(100, 3);
-        map[vec![0, 100, 0]]
-    }
-
-    #[test]
-    #[should_panic]
-    fn test_index_set_map_not_a_set() {
-        let map = IndexSetMap::new(100, 3);
-        map[vec![1, 3, 3]]
-    }
-
-    #[test]
-    fn test_index_set_map_1() {
-        let mut map = IndexSetMap::new(100, 3);
-        map[vec![1, 2, 3]] = "frog";
-        let index = vec![3, 1, 2];
-        assert_eq!(map[index], "frog");
-        map[vec![42usize, 21usize, 10usize]] = "dragonfly";
-        assert_eq!(map[vec![10usize, 21usize, 42usize]], "dragonfly");
-    }
-
-    #[test]
-    fn test_index_set_map_2() {
-        let mut map = IndexSetMap::new(10, 3);
-        let ten: Vec<_> = (0..9).collect();
-        for subset in combinations(&ten, 3) {
-            let val = subset[0] * 100 + subset[1] * 10 + subset[0];
-            map[subset] = val;
-        }
-        for subset in combinations(&ten, 3) {
-            let val = subset[0] * 100 + subset[1] * 10 + subset[0];
-            assert_eq!(map[subset], val);
-        }
-    }
-
-    #[test]
-    fn test_index_set_map_default() {
-        let mut map: IndexSetMap<NaturalOrInfinite> = IndexSetMap::new(12, 2);
-        assert_eq!(map[vec![0, 11]], NaturalOrInfinite::default());
-        map[vec![11, 0]] = NaturalOrInfinite(42);
-        assert_eq!(map[vec![0, 11]], NaturalOrInfinite(42));
-    }
-
-    #[test]
-    fn test_index_set_maps() {
-        let mut maps: IndexSetMaps<usize> = IndexSetMaps::new(1);
-        let elements: Vec<_> = (0..10).collect();
-        for subset in non_trivial_subsets(&elements) {
-            if maps.len() < subset.len() {
-                maps.push(IndexSetMap::new(10, subset.len()));
-            }
-            let val = subset.iter().sum::<usize>() - subset[0] & 0xbadf00d_usize;
-            maps[subset] = val;
-        }
-        for subset in non_trivial_subsets(&elements) {
-            let val = subset.iter().sum::<usize>() - subset[0] & 0xbadf00d;
-            assert_eq!(maps[subset], val);
-        }
-    }
-
-    #[test]
-    fn test_index_set_maps_shortest_paths() -> TestResult {
-        let graph = steiner_example_wiki()?;
-        let shortest_paths = ShortestPathMatrix::new(&graph);
-        let mut maps: IndexSetMaps<NaturalOrInfinite> = IndexSetMaps::new(2);
-        maps.push(IndexSetMap::new(graph.num_nodes(), 2));
-        let nodes = graph.node_indices().collect::<Vec<_>>();
-        for pair in combinations(&nodes, 2) {
-            let distance = shortest_paths[pair[0]][pair[1]].distance();
-            println!("map[{:?}] = {:?}", pair, distance);
-            maps[pair] = distance;
-        }
-        assert_eq!(shortest_paths[0][1].distance(), 15.into());
-        assert_eq!(shortest_paths[6][1].distance(), 110.into());
-        assert_eq!(maps[vec![0, 1]], 15.into());
-        assert_eq!(maps[vec![6, 1]], 110.into());
-        Ok(())
     }
 }
