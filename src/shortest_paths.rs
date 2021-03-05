@@ -1,5 +1,5 @@
 use crate::graph::{Edge, NodeIndex};
-use crate::util::{NaturalOrInfinite, PriorityValuePair};
+use crate::util::{NaturalOrInfinite, PriorityValuePair, edge};
 use crate::Graph;
 use std::cmp::{Ordering, Reverse};
 use std::collections::{BinaryHeap, HashSet};
@@ -58,7 +58,24 @@ impl ShortestPath {
         iter::once(start)
             .chain(self.path().iter().copied())
             .zip(self.path().iter().copied())
-            .map(|(a, b)| (a.min(b), a.max(b)))
+            .map(|(a, b)| edge(a, b))
+    }
+
+
+    /// Get the edges of the path when it starts at `start`.
+    /// Edges are output in the form `[from, to]` in the order in which the nodes appear on the
+    /// path.
+    /// **Don't treat the returned edges as undirected edges** because the rest of the code assumes
+    /// that undirected edges have the form `(a, b)` where `a < b` which is not guaranteed here.
+    /// To avoid confusion with undirected edges, the edges are returned as arrays instead of tuples.
+    pub fn edges_on_path_directed(
+        &self,
+        start: NodeIndex,
+    ) -> impl Iterator<Item = [NodeIndex; 2]> + '_ {
+        iter::once(start)
+            .chain(self.path().iter().copied())
+            .zip(self.path().iter().copied())
+            .map(|(a, b)| [a, b])
     }
 }
 

@@ -482,9 +482,9 @@ pub fn takahashi_matsuyama_steiner_approximation(graph: &Graph) -> EdgeTree {
         let path = terminal_to_all[term_idx][min].as_ref().unwrap().clone();
         todo.remove(&term_idx);
         // TODO: Parallelize.
-        for edge in path.edges_on_path(graph.terminals()[term_idx]) {
-            tree.insert(edge);
-            let new: NodeIndex = edge.0;
+        for e in path.edges_on_path_directed(graph.terminals()[term_idx]) {
+            tree.insert(edge(e[0], e[1]));
+            let new: NodeIndex = e[0]; // this works because we're iterating over *directed* edges
             if nodes_of_tree.contains(&new) {
                 continue;
             }
@@ -654,6 +654,7 @@ mod tests {
     fn test_approximation_bounds() -> TestResult {
         let graphs = [
             small_test_graph()?,
+            diamond_test_graph()?,
             shortcut_test_graph()?,
             steiner_example_paper()?,
             steiner_example_wiki()?,
