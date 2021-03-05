@@ -7,6 +7,7 @@ use crate::util::{
 use crate::Graph;
 use std::cmp::{min, Reverse};
 use std::collections::{BinaryHeap, HashMap, HashSet};
+use rayon::prelude::*;
 
 // The position in the outer vector encodes the non-leaf node.
 type NonLeafWeights = Vec<HashMap<Vec<NodeIndex>, NaturalOrInfinite>>;
@@ -465,13 +466,17 @@ where
     tree
 }
 
-/// Steiner tree approximation based on the method described in
+
+/// Serial Steiner tree approximation based on the method described in
 ///   Takahashi, Hiromitsu; Matsuyama, Akira (1980).
 ///   "An approximate solution for the Steiner problem in graphs"
-pub fn takahashi_matsuyama_steiner_approximation(graph: &Graph) -> EdgeTree {
+///
+/// This function is very similar to the parallel version. I have included it to be able to compare
+/// the serial running time to the parallel running time while avoiding any potential overhead
+/// induced by rayon.
+pub fn takahashi_matsuyama_steiner_approximation_serial(graph: &Graph) -> EdgeTree {
     // Mapping of the shortest paths from each terminal node to all nodes of the graph.
     let mut terminal_to_all = vec![vec![]; graph.num_terminals()];
-    // TODO: Parallelize.
     for (idx, &terminal) in graph.terminals().iter().enumerate() {
         terminal_to_all[idx] = dijkstra(&graph, terminal);
     }
@@ -488,12 +493,10 @@ pub fn takahashi_matsuyama_steiner_approximation(graph: &Graph) -> EdgeTree {
             .expect("terminals not connected");
         todo.insert(term_idx, (initial, min.distance()));
     }
-    // TODO: Parallelize min search?
     while let Some(&term_idx) = todo.keys().min_by_key(|k| todo[k].1) {
         let (min, _dist) = todo[&term_idx];
         let path = terminal_to_all[term_idx][min].as_ref().unwrap().clone();
         todo.remove(&term_idx);
-        // TODO: Parallelize.
         for e in path.edges_on_path_directed(graph.terminals()[term_idx]) {
             tree.insert(edge(e[0], e[1]));
             let new: NodeIndex = e[0]; // this works because we're iterating over *directed* edges
@@ -509,6 +512,58 @@ pub fn takahashi_matsuyama_steiner_approximation(graph: &Graph) -> EdgeTree {
                 }
             }
         }
+    }
+    tree
+}
+
+/// Parallelized Steiner tree approximation based on the method described in
+///   Takahashi, Hiromitsu; Matsuyama, Akira (1980).
+///   "An approximate solution for the Steiner problem in graphs"
+pub fn takahashi_matsuyama_steiner_approximation(graph: &Graph) -> EdgeTree {
+    // Mapping of the shortest paths from each terminal node to all nodes of the graph.
+    let mut terminal_to_all = vec![vec![]; graph.num_terminals()];
+    terminal_to_all.par_iter_mut().enumerate().for_each(|(idx, row)| {
+        let terminal = graph.terminals()[idx];
+        // store distances from current terminal to all the other nodes
+        *row = dijkstra(&graph, terminal);
+    });
+    // Stores the nodes that are already part of the tree.
+    let mut nodes_of_tree = HashSet::new();
+    let initial: NodeIndex = *graph.terminals().first().unwrap();
+    nodes_of_tree.insert(initial);
+    let mut tree = EdgeTree::empty();
+    // The set of terminal node indices which have not been processed yet.
+    let mut todo = HashMap::new();
+    for term_idx in 1..graph.num_terminals() {
+        let min = terminal_to_all[term_idx][initial]
+            .as_ref()
+            .expect("terminals not connected");
+        todo.insert(term_idx, (initial, min.distance()));
+    }
+    while let Some(&term_idx) = todo.keys().min_by_key(|k| todo[k].1) {
+        let (min, _dist) = todo[&term_idx];
+        let path = terminal_to_all[term_idx][min].as_ref().unwrap().clone();
+        todo.remove(&term_idx);
+
+        // Concurrently find the new minimum connection from the nodes of the tree to the terminals
+        // that are not part of the tree yet.
+        todo.iter_mut().par_bridge().for_each(|(&cmp_term_idx, value)| {
+            for e in path.edges_on_path_directed(graph.terminals()[term_idx]) {
+                let new: NodeIndex = e[0]; // this works because we're iterating over *directed* edges
+                if nodes_of_tree.contains(&new) {
+                    continue;
+                }
+                if let Some(dist) = &terminal_to_all[cmp_term_idx][new] {
+                    if dist.distance() < value.1 {
+                        *value = (new, dist.distance());
+                    }
+                }
+            }
+        });
+
+        // add nodes and edges concurrently
+        rayon::join(|| nodes_of_tree.extend(path.edges_on_path_directed(graph.terminals()[term_idx]).map(|e| e[0])),
+                    || path.edges_on_path(graph.terminals()[term_idx]).for_each(|edge| tree.insert(edge)));
     }
     tree
 }
