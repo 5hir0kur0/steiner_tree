@@ -3,6 +3,8 @@ use crate::shortest_paths::ShortestPath;
 use crate::util::NaturalOrInfinite;
 use crate::Graph;
 use std::collections::{HashMap, HashSet};
+use std::io::Write;
+use std::io;
 
 /// A tree represented by the set of its edges.
 /// This struct should only be used to represent actual trees.
@@ -60,6 +62,15 @@ impl EdgeTree {
             weight = weight + w;
         }
         weight
+    }
+
+    /// Write the tree to a writer in the PACE 2018 format.
+    pub fn write<W: Write>(&self, writer: &mut W, graph: &Graph) -> io::Result<()> {
+        writeln!(writer, "VALUE {}", self.weight_in(graph).finite_value())?;
+        for (from, to) in self.edges() {
+            writeln!(writer, "{} {}", from, to)?;
+        }
+        Ok(())
     }
 
     #[cfg(test)]
