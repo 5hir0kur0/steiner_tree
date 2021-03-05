@@ -278,6 +278,15 @@ pub(crate) fn is_sorted<T: Ord>(elements: &[T]) -> bool {
     true
 }
 
+pub(crate) fn is_sorted_by_key<T, F: Fn(&T) -> K, K: Ord>(elements: &[T], key: F) -> bool {
+    for (a, b) in elements.iter().zip(elements.iter().skip(1)) {
+        if key(a) > key(b) {
+            return false;
+        }
+    }
+    true
+}
+
 /// Stores a `value` together with a `priority`. Can be used for priority queues such as
 /// [std::collections::BinaryHeap].
 /// The values will be ordered by the `priority`.

@@ -1,4 +1,4 @@
-use crate::util::NaturalOrInfinite;
+use crate::util::{NaturalOrInfinite, is_sorted_by_key};
 use std::fmt::Display;
 use std::num::ParseIntError;
 use std::{error::Error, str::FromStr};
@@ -12,6 +12,18 @@ pub type EdgeWeight = u32;
 pub struct Edge {
     pub to: NodeIndex,
     pub weight: EdgeWeight,
+}
+
+impl Edge {
+    /// Return the head of the edge (`edge.to`).
+    pub fn head(&self) -> NodeIndex {
+        self.to
+    }
+
+    /// Return the weight of the edge (`edge.to`).
+    pub fn weight(&self) -> EdgeWeight {
+        self.weight
+    }
 }
 
 /// Undirected graph stored as an adjacency vector.
@@ -68,13 +80,13 @@ impl Graph {
     }
 
     /// Return the weigh of the edge between `from` and `to`.
-    // TODO: efficient implementation
     pub fn weight(&self, from: NodeIndex, to: NodeIndex) -> NaturalOrInfinite {
-        self.edges[from]
-            .iter()
-            .find(|x| x.to == to)
-            .map(|e| e.weight)
+        debug_assert!(is_sorted_by_key(&self.edges[from], Edge::head));
+        let idx = self.edges[from]
+            .binary_search_by_key(&to, Edge::head);
+        idx.map(|i| self.edges[from][i].weight)
             .map(NaturalOrInfinite::from)
+            .ok()
             .unwrap_or_else(NaturalOrInfinite::infinity)
     }
 }
