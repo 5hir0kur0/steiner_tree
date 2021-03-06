@@ -362,7 +362,7 @@ pub fn kou_et_al_steiner_approximation(graph: &Graph) -> EdgeTree {
     );
     // If there are leaves that are non-terminal nodes then the weight can be
     // decreased by removing the respective edges.
-    remove_non_terminal_leaves(&mut subgraph_mst, graph);
+    subgraph_mst = remove_non_terminal_leaves(&subgraph_mst, graph);
     subgraph_mst
 }
 
