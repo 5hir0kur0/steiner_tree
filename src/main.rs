@@ -14,8 +14,20 @@ use std::time::{Duration, Instant};
 
 fn main() -> Result<(), Box<dyn Error>> {
     let args = env::args().skip(1).collect::<Vec<_>>();
+    if args.len() == 1 && &args[0] == "header"{
+        println!("# delete this comment and always join 5 lines of text to get the final CSV");
+        println!(
+            "filename, num_edges, num_nodes, num_terminals, average_degree, min_degree, \
+                      max_degree, average_weight, min_weight, max_weight, "
+        );
+        println!("dreyfus_weight, dreyfus_time, ");
+        println!("kou_weight, kou_time, ");
+        println!("takahashi_weight_serial, takahashi_time_serial, ");
+        println!("takahashi_weight_parallel, takahashi_time_parallel");
+        return Ok(());
+    }
     if args.len() != 2 {
-        eprintln!("usage: {{header, stats, exact, approx1, approx2s, approx2p}} FILENAME");
+        eprintln!("usage: {{header, stats, exact, approx1, approx2s, approx2p}} <FILENAME>");
         eprintln!("  Arguments should always be used in this order on one file");
         eprintln!("  and stdout should be appended to a file to get the CSV data.");
         eprintln!("  See benchmark.sh script in this repo.");
@@ -26,20 +38,10 @@ fn main() -> Result<(), Box<dyn Error>> {
     let content = fs::read_to_string(filename)?;
     let graph: Graph = content.parse()?;
     match &args[0] as &str {
-        "header" => {
-            println!("# delete this comment and always join 5 lines of text to get the final CSV");
-            println!(
-                "filename, num_edges, num_nodes, num_terminals, average_degree, min_degree, \
-                      max_degree, average_weight, min_weight, max_weight"
-            );
-            println!("dreyfus_weight, dreyfus_time");
-            println!("kou_weight, kou_time");
-            println!("takahashi_weight, takahashi_time");
-        }
         "stats" => {
             let stats = GraphStatistics::new(&graph);
             println!(
-                "{fp}, {ne}, {nn}, {nt}, {ad}, {md}, {Md}, {aw}, {mw}, {Mw}",
+                "{fp}, {ne}, {nn}, {nt}, {ad}, {md}, {Md}, {aw}, {mw}, {Mw}, ",
                 fp = filename,
                 ne = stats.num_edges,
                 nn = stats.num_nodes,
@@ -140,7 +142,7 @@ fn benchmark_alg<F: Fn(&Graph) -> EdgeTree, P: AsRef<str>>(
     eprintln!("{} tree = {:?}", name, tree);
     let weight = tree.weight_in(&graph);
     eprintln!("{} weight = {:?}", name, weight);
-    println!("{}, {}, ", weight.finite_value(), time.as_millis());
+    println!("{}, {}, ", weight.finite_value(), time.as_nanos());
     let mut exact_file = File::create(format!("{}.exact.ost", filename.as_ref()))?;
     tree.write(&mut exact_file, &graph)
 }
