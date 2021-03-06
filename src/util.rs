@@ -1,14 +1,10 @@
 use crate::graph::NodeIndex;
 use std::cmp::Ordering;
-use std::error::Error;
 use std::fmt::Debug;
-use std::ops::{Add, Index, IndexMut};
-
-/// Result with boxed error as trait object.
-pub type GenericResult<T> = Result<T, Box<dyn Error + Send + Sync>>;
+use std::ops::Add;
 
 #[cfg(test)]
-pub(crate) type TestResult = GenericResult<()>;
+pub(crate) type TestResult = Result<(), Box<dyn std::error::Error>>;
 
 /// Numerical type that can either be an unsigned number or positive infinity.
 // infinity is encoded as `-1`; all other negative values are illegal
@@ -208,66 +204,6 @@ impl<'a, T: Copy> Iterator for NonTrivialSubsets<'a, T> {
     }
 }
 
-pub struct Vector<T: Default + Clone> {
-    vec: Vec<T>,
-    dimensions: Vec<usize>,
-    products: Vec<usize>, // for each dimension the product of the following dimensions
-}
-
-impl<T: Default + Clone> Vector<T> {
-    pub fn new(dimensions: Vec<usize>) -> Self {
-        let size = dimensions.iter().product();
-        let mut vec = Vec::new();
-        // This vector is impossible to grow through the current API so it shouldn't reserve more
-        // space for future insertions.
-        vec.reserve_exact(size);
-        for _ in 0..size {
-            vec.push(T::default());
-        }
-        vec.shrink_to_fit();
-        let products = (0..dimensions.len())
-            .map(|d| dimensions[d + 1..].iter().product())
-            .collect();
-        Vector {
-            dimensions,
-            vec,
-            products,
-        }
-    }
-
-    fn raw_index(&self, index: &[usize]) -> usize {
-        debug_assert!(
-            index
-                .iter()
-                .enumerate()
-                .all(|(ii, &i)| i < self.dimensions[ii]),
-            format!("index out of range: {:?}", index)
-        );
-        index
-            .iter()
-            .copied()
-            .enumerate()
-            .map(|(ii, i)| self.products[ii] * i)
-            .sum()
-    }
-}
-
-impl<T: Default + Clone> Index<&[usize]> for Vector<T> {
-    type Output = T;
-
-    fn index(&self, index: &[usize]) -> &Self::Output {
-        let raw_index = self.raw_index(index);
-        &self.vec[raw_index]
-    }
-}
-
-impl<T: Default + Clone> IndexMut<&[usize]> for Vector<T> {
-    fn index_mut(&mut self, index: &[usize]) -> &mut Self::Output {
-        let raw_index = self.raw_index(index);
-        &mut self.vec[raw_index]
-    }
-}
-
 /// Check if the slice is sorted in non-decreasing order..
 pub(crate) fn is_sorted<T: Ord>(elements: &[T]) -> bool {
     for (a, b) in elements.iter().zip(elements.iter().skip(1)) {
@@ -400,46 +336,6 @@ pub(crate) mod tests {
             for (_, comb) in (0..3).zip(combinations(&lots, n)) {
                 assert!(is_sorted(&comb))
             }
-        }
-    }
-
-    #[test]
-    fn test_raw_index() {
-        let vec: Vector<String> = Vector::new(vec![4, 3, 2]);
-        assert_eq!(vec.raw_index(&[1, 2, 1]), 11);
-        assert_eq!(vec.raw_index(&[2, 1, 0]), 14);
-        assert_eq!(vec.raw_index(&[3, 2, 1]), 23);
-        assert_eq!(vec.raw_index(&[1, 1, 1]), 9);
-        let vec: Vector<String> = Vector::new(vec![42]);
-        assert_eq!(vec.raw_index(&[21]), 21);
-        let vec: Vector<&str> = Vector::new(vec![12, 24, 7, 17, 13, 5]);
-        let index = &[9, 21, 5, 12, 7, 3];
-        assert_eq!(
-            vec.raw_index(index),
-            9 * (24 * 7 * 17 * 13 * 5)
-                + 21 * (7 * 17 * 13 * 5)
-                + 5 * (17 * 13 * 5)
-                + 12 * (13 * 5)
-                + 7 * 5
-                + 3
-        );
-    }
-
-    #[test]
-    fn test_vector() {
-        let mut vec: Vector<&str> = Vector::new(vec![12, 24, 7, 17, 13, 5]);
-        let index = &[9, 21, 5, 12, 7, 3];
-        vec[index] = "parrot";
-        assert_eq!(vec[index], "parrot");
-        let index = &[9, 0, 5, 0, 7, 3];
-        vec[index] = "doggo";
-        assert_eq!(vec[index], "doggo");
-        let mut vec: Vector<usize> = Vector::new(vec![10]);
-        for i in 0..10 {
-            vec[&[i]] = i;
-        }
-        for i in 0..10 {
-            assert_eq!(vec[&[i]], i);
         }
     }
 }

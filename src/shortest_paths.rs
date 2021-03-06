@@ -1,5 +1,5 @@
 use crate::graph::{Edge, NodeIndex};
-use crate::util::{NaturalOrInfinite, PriorityValuePair, edge};
+use crate::util::{edge, NaturalOrInfinite, PriorityValuePair};
 use crate::Graph;
 use std::cmp::{Ordering, Reverse};
 use std::collections::{BinaryHeap, HashSet};
@@ -60,7 +60,6 @@ impl ShortestPath {
             .zip(self.path().iter().copied())
             .map(|(a, b)| edge(a, b))
     }
-
 
     /// Get the edges of the path when it starts at `start`.
     /// Edges are output in the form `[from, to]` in the order in which the nodes appear on the
@@ -258,7 +257,7 @@ where
         let mut reversed = path;
         reversed.pop(); // remove `start`
         reversed.reverse();
-        shortest_paths[goal] = Some(ShortestPath::new(reversed, key[goal].into()));
+        shortest_paths[goal] = Some(ShortestPath::new(reversed, key[goal]));
     }
     shortest_paths[start] = Some(ShortestPath::empty());
     shortest_paths
@@ -267,7 +266,7 @@ where
 /// Helper function for Dijkstra's algorithm to track back the shortest path using the `parent`
 /// array.
 /// Returns an empty vector if `end` is unreachable from `start`.
-fn trace_path(parent: &Vec<Option<NodeIndex>>, start: NodeIndex, end: NodeIndex) -> Vec<NodeIndex> {
+fn trace_path(parent: &[Option<NodeIndex>], start: NodeIndex, end: NodeIndex) -> Vec<NodeIndex> {
     let mut res = vec![start];
     let mut current = start;
     // Just follow the "pointers" in the `parent` vector until the `end` is reached.

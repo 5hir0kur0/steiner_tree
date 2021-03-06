@@ -3,8 +3,8 @@ use crate::shortest_paths::ShortestPath;
 use crate::util::NaturalOrInfinite;
 use crate::Graph;
 use std::collections::{HashMap, HashSet};
-use std::io::Write;
 use std::io;
+use std::io::Write;
 
 /// A tree represented by the set of its edges.
 /// This struct should only be used to represent actual trees.
@@ -73,16 +73,14 @@ impl EdgeTree {
         Ok(())
     }
 
-    #[cfg(test)]
-    pub(crate) fn nodes(&self) -> HashSet<NodeIndex> {
+    pub fn nodes(&self) -> HashSet<NodeIndex> {
         self.edges
             .iter()
             .flat_map(|&(a, b)| std::iter::once(a).chain(std::iter::once(b)))
             .collect::<HashSet<_>>()
     }
 
-    #[cfg(test)]
-    pub(crate) fn neighbors(&self, node: NodeIndex) -> HashSet<NodeIndex> {
+    pub fn neighbors(&self, node: NodeIndex) -> HashSet<NodeIndex> {
         let mut neighbors = HashSet::new();
         for &(from, to) in self.edges() {
             if from == node {
@@ -96,7 +94,6 @@ impl EdgeTree {
     }
 
     /// Find the leaves of the tree. Not efficient but useful for debug assertions/testing.
-    #[cfg(debug_assertions)]
     pub fn find_leaves(&self) -> HashSet<NodeIndex> {
         let mut encountered: HashMap<NodeIndex, (u32, (NodeIndex, NodeIndex))> = HashMap::new();
         for &(from, to) in self.edges() {
@@ -115,7 +112,7 @@ impl EdgeTree {
         leaves
     }
 
-    pub(crate) fn edges(&self) -> &HashSet<(NodeIndex, NodeIndex)> {
+    pub fn edges(&self) -> &HashSet<(NodeIndex, NodeIndex)> {
         &self.edges
     }
 }

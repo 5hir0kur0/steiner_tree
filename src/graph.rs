@@ -1,4 +1,4 @@
-use crate::util::{NaturalOrInfinite, is_sorted_by_key};
+use crate::util::{is_sorted_by_key, NaturalOrInfinite};
 use std::fmt::Display;
 use std::num::ParseIntError;
 use std::{error::Error, str::FromStr};
@@ -82,8 +82,7 @@ impl Graph {
     /// Return the weigh of the edge between `from` and `to`.
     pub fn weight(&self, from: NodeIndex, to: NodeIndex) -> NaturalOrInfinite {
         debug_assert!(is_sorted_by_key(&self.edges[from], Edge::head));
-        let idx = self.edges[from]
-            .binary_search_by_key(&to, Edge::head);
+        let idx = self.edges[from].binary_search_by_key(&to, Edge::head);
         idx.map(|i| self.edges[from][i].weight)
             .map(NaturalOrInfinite::from)
             .ok()
