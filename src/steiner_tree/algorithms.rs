@@ -771,9 +771,13 @@ mod tests {
                     "exact_weight = {}, approx_weight = {}, leaves = {:?}",
                     exact_weight, approx_weight, leaves
                 );
+                let div = if name.starts_with("kou") {
+                    leaves
+                } else {
+                    graph.num_terminals()
+                };
                 assert!(
-                    (approx_weight as f64) / (exact_weight as f64)
-                        <= (2.0 - (2.0 / (leaves as f64)))
+                    (approx_weight as f64) / (exact_weight as f64) <= (2.0 - (2.0 / (div as f64)))
                 );
             }
         }

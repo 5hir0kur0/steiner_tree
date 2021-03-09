@@ -5,16 +5,16 @@
 
 use std::error::Error;
 use std::fs::File;
+use std::time::{Duration, Instant};
 use std::{env, fs, io};
 use steiner_tree::{
     dreyfus_wagner, kou_et_al_steiner_approximation, takahashi_matsuyama_steiner_approximation,
     takahashi_matsuyama_steiner_approximation_serial, EdgeTree, Graph,
 };
-use std::time::{Duration, Instant};
 
 fn main() -> Result<(), Box<dyn Error>> {
     let args = env::args().skip(1).collect::<Vec<_>>();
-    if args.len() == 1 && &args[0] == "header"{
+    if args.len() == 1 && &args[0] == "header" {
         println!("# delete this comment and always join 5 lines of text to get the final CSV");
         println!(
             "filename, num_edges, num_nodes, num_terminals, average_degree, min_degree, \
