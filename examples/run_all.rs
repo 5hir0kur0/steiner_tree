@@ -64,16 +64,15 @@ pub fn main() -> Result<(), Box<dyn Error>> {
     println!();
 
     println!("Checking upper bound...");
-    let upper_bound = 2.0 - (2.0 / (leaves as f64));
     assert!(
         (kou_approx.weight_in(&graph).finite_value() as f64)
             / (tree.weight_in(&graph).finite_value() as f64)
-            <= upper_bound
+            <= 2.0 - (2.0 / (leaves as f64))
     );
     assert!(
         (takahashi_approx.weight_in(&graph).finite_value() as f64)
             / (tree.weight_in(&graph).finite_value() as f64)
-            <= upper_bound
+            <= 2.0 - (2.0 / (graph.num_terminals() as f64))
     );
     Ok(())
 }
